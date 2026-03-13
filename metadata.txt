@@ -1,0 +1,46 @@
+[general]
+name=DURH Diária por Telemetria - Monitoramento e Cadastro
+qgisMinimumVersion=3.0
+description=Plugin para gestão e cadastro de operadores e medidores no banco de dados DURH Diária por Telemetria - PostgreSQL/PostGIS, com acesso integrado a dados sensíveis do CAR (Cadastro Ambiental Rural) protegidos por LGPD.
+version=2.0
+author=Superintendência de Fiscalização/Agência Nacional de Águas e Saneamento Básico (SFI/ANA).
+email=sfi@ana.gov.br
+
+about=Este plugin, em atendimento à Resolução ANA n. 188, de 20 de março de 2024, permite monitorar e cadastrar dados de operadores de telemetria e medidores de consumo de água no banco DURH Diária por Telemetria, além de acessar dados sensíveis do CAR (Cadastro Ambiental Rural) de domínio privado.
+    
+    Principais Funcionalidades:
+    * Autenticação Segura: Login com QSettings, opção "Lembrar credenciais" e tratamento de erros específico por contexto.
+    * Acesso a Dados Sensíveis (CAR Privado): Integração com ArcGIS REST Services da ANA para visualização de dados do CAR protegidos por LGPD, com autenticação institucional, termo de responsabilidade e tokens temporários (2h).
+    * Validação Inteligente de Dados: Detecção de overflow em consumo diário e intervalos de 15min, com correção automática via vazão × duração.
+    * Exportação Multiformal: Relatórios em Excel (openpyxl), gráficos PNG (300 DPI) e TXT com template de e-mail em negrito Unicode.
+    * Integração Avançada com QGIS: Múltiplas camadas base (OSM, ESRI, Google Satellite, ESRI REST MapServer público e privado), zoom dinâmico e identificação personalizada com tooltips HTML.
+    * Processamento Assíncrono: Threads dedicadas para ETL, verificação de outorga e cálculo de totais, sem travar a interface do QGIS.
+    * Perfis de Acesso Adaptativos: UI dinâmica para usuários read-only (telemetria_ro) com campos desabilitados e botões condicionais.
+
+tracker=
+repository=
+tags=telemetria,monitoramento,cadastro,operadores,medidores,postgis,postgresql,qgis,ana,sfi,durh,car,lgpd,dados-sensiveis,arcgis-rest
+homepage=
+category=Database
+icon=icon.png
+
+experimental=False
+deprecated=False
+
+changelog=
+    2.0 - Versão com UI/UX aprimorado, Acesso a Dados Sensíveis e Novas Funcionalidades
+        - Interface moderna com login seguro, cards e temas arredondados
+        - Módulo de Gestão com Dashboard, Operadores e Medidores
+        - Monitoramento com alertas de consumo, gráficos e detalhes 15min
+        - Validação de overflow e conversão automática de unidades
+        - ETL para atualização de base (ArcGIS MapServer e Oracle DW)
+        - Exportação de relatórios técnicos (Excel, PNG, TXT)
+        - Suporte a perfis de usuário (Leitura e Escrita)
+        - Integração avançada com QGIS Map Canvas e camadas Web
+        - Acesso ao webservice privado do CAR (car_dominio_privado_v2) via ArcGIS REST API
+        - Autenticação institucional ANA com fluxo de token temporário (2 horas)
+        - Diálogo de login CAR com termo de responsabilidade LGPD e aviso de dados sensíveis
+        - Botão de visualização de senha (olho aberto/fechado) nos moldes do login principal
+        - Persistência de usuário CAR (não senha) via QSettings para facilitar reautenticação
+        - Formato de requisição otimizado (f=html) para compatibilidade com QGIS MapServer
+        - Metadados de atribuição indicando proteção LGPD nos dados CAR carregados
