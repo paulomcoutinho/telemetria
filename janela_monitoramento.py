@@ -348,15 +348,26 @@ class JanelaMonitoramento(QWidget):
         self.setLayout(layout)
 
     def _perguntar_verificacao_consumo(self):
-        """Diálogo de seleção de meses — 6 meses com Selecionar todos."""
+        """Diálogo de seleção de período — 6 meses (checkboxes) OU intervalo livre.
+ 
+        Apresenta dois RadioButtons para alternar o modo de verificação:
+          • **6 últimos meses** — checkboxes com os 6 meses recentes (padrão).
+          • **Por período** — dois QDateEdit (início / fim) com calendário popup.
+ 
+        Ao confirmar, define:
+          - ``self.meses_para_verificar`` — lista de itens de fila.
+          - ``self._modo_verificacao``    — ``'mensal'`` ou ``'por_periodo'``.
+        """
         from datetime import date
-
+        from qgis.PyQt.QtWidgets import QRadioButton, QStackedWidget, QDateEdit
+        from qgis.PyQt.QtCore import QDate
+ 
         hoje        = date.today()
         nomes_meses = [
             "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
             "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
         ]
-
+ 
         # Gera 6 meses: atual primeiro, depois os 5 anteriores
         self._meses_opcoes = []
         for i in range(6):
@@ -367,22 +378,23 @@ class JanelaMonitoramento(QWidget):
                 ano_num -= 1
             sufixo = " (Mês Atual)" if i == 0 else (" (Mês Anterior)" if i == 1 else "")
             self._meses_opcoes.append({
-                'mes':  mes_num,
-                'ano':  ano_num,
-                'nome': nomes_meses[mes_num - 1],
+                'mes':   mes_num,
+                'ano':   ano_num,
+                'nome':  nomes_meses[mes_num - 1],
                 'label': f"{nomes_meses[mes_num - 1]}/{ano_num}{sufixo}",
-                'tipo': 'atual' if i == 0 else f"anterior_{i}",
+                'tipo':  'atual' if i == 0 else f"anterior_{i}",
             })
-
+ 
         dialog = QDialog(self)
         dialog.setWindowTitle("Verificação de Consumo")
-        dialog.setMinimumSize(420, 500)
+        dialog.setMinimumSize(440, 560)
         dialog.setModal(True)
-
+ 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
-
+ 
+        # ── Container principal ────────────────────────────────────────────
         container = QFrame()
         container.setObjectName("ContainerBranco")
         container.setStyleSheet(f"""
@@ -395,7 +407,8 @@ class JanelaMonitoramento(QWidget):
         """)
         container_layout = QVBoxLayout(container)
         container_layout.setSpacing(12)
-
+ 
+        # Ícone / título / mensagem
         lbl_icon = QLabel("❓")
         lbl_icon.setAlignment(Qt.AlignCenter)
         lbl_icon.setStyleSheet(f"""
@@ -403,7 +416,7 @@ class JanelaMonitoramento(QWidget):
             background: transparent;
         """)
         container_layout.addWidget(lbl_icon)
-
+ 
         titulo = QLabel("Verificação de Consumo Total")
         titulo.setAlignment(Qt.AlignCenter)
         titulo.setStyleSheet(f"""
@@ -412,7 +425,7 @@ class JanelaMonitoramento(QWidget):
             background: transparent; font-family: 'Segoe UI', sans-serif;
         """)
         container_layout.addWidget(titulo)
-
+ 
         mensagem = QLabel(
             "Deseja verificar se o consumo total de alguma interferência "
             "está acima do volume outorgado?"
@@ -425,26 +438,55 @@ class JanelaMonitoramento(QWidget):
             font-family: 'Segoe UI', sans-serif;
         """)
         container_layout.addWidget(mensagem)
-
+ 
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
         line.setStyleSheet(f"background-color: {ui_tema.StyleConfig.BORDER_COLOR};")
         container_layout.addWidget(line)
-
-        lbl_selecao = QLabel("Selecione o(s) período(s) para análise:")
+ 
+        lbl_selecao = QLabel("Selecione o método de análise:")
         lbl_selecao.setStyleSheet(
             "font-weight: bold; font-size: 12px; color: #495057; margin-top: 5px;"
         )
         container_layout.addWidget(lbl_selecao)
-
-        # Checkboxes
+ 
+        # ── RadioButtons ───────────────────────────────────────────────────
+        estilo_radio = f"""
+            QRadioButton {{
+                font-size: 12px; font-weight: bold;
+                color: {ui_tema.StyleConfig.PRIMARY_COLOR}; spacing: 8px;
+            }}
+            QRadioButton::indicator {{ width: 16px; height: 16px; }}
+        """
+        radio_layout = QHBoxLayout()
+        radio_layout.setSpacing(20)
+ 
+        self._radio_meses   = QRadioButton("6 últimos meses")
+        self._radio_periodo = QRadioButton("Por período")
+        self._radio_meses.setStyleSheet(estilo_radio)
+        self._radio_periodo.setStyleSheet(estilo_radio)
+        self._radio_meses.setChecked(True)  # padrão
+ 
+        radio_layout.addWidget(self._radio_meses)
+        radio_layout.addWidget(self._radio_periodo)
+        radio_layout.addStretch()
+        container_layout.addLayout(radio_layout)
+ 
+        # ── QStackedWidget ─────────────────────────────────────────────────
+        stacked = QStackedWidget()
+ 
+        # ── Painel 0: checkboxes de meses ─────────────────────────────────
+        painel_meses = QWidget()
+        pm_layout = QVBoxLayout(painel_meses)
+        pm_layout.setContentsMargins(0, 4, 0, 0)
+        pm_layout.setSpacing(6)
+ 
         estilo_chk = f"""
             QCheckBox {{
                 font-size: 12px; color: #343a40; spacing: 8px;
             }}
             QCheckBox::indicator {{
-                width: 18px; height: 18px;
-                border-radius: 3px;
+                width: 18px; height: 18px; border-radius: 3px;
                 border: 2px solid {ui_tema.StyleConfig.PRIMARY_COLOR};
             }}
             QCheckBox::indicator:checked {{
@@ -455,7 +497,7 @@ class JanelaMonitoramento(QWidget):
         checkbox_layout = QVBoxLayout()
         checkbox_layout.setSpacing(8)
         checkbox_layout.setContentsMargins(20, 5, 20, 5)
-
+ 
         self._checkboxes_meses = []
         for opcao in self._meses_opcoes:
             chk = QCheckBox(opcao['label'])
@@ -463,10 +505,9 @@ class JanelaMonitoramento(QWidget):
             chk.setChecked(opcao['tipo'] in ('atual', 'anterior_1'))
             checkbox_layout.addWidget(chk)
             self._checkboxes_meses.append(chk)
-
-        container_layout.addLayout(checkbox_layout)
-
-        # Botão Selecionar todos / Limpar seleção
+ 
+        pm_layout.addLayout(checkbox_layout)
+ 
         btn_sel_todos = QPushButton("Selecionar todos")
         btn_sel_todos.setCursor(Qt.PointingHandCursor)
         btn_sel_todos.setStyleSheet(f"""
@@ -479,31 +520,84 @@ class JanelaMonitoramento(QWidget):
             }}
             QPushButton:hover {{ background-color: #e8f0fe; }}
         """)
-
+ 
         def _toggle_selecao():
             todos = all(c.isChecked() for c in self._checkboxes_meses)
             for c in self._checkboxes_meses:
                 c.setChecked(not todos)
-            btn_sel_todos.setText(
-                "Selecionar todos" if todos else "Limpar seleção"
-            )
-
+            btn_sel_todos.setText("Selecionar todos" if todos else "Limpar seleção")
+ 
         def _sync_label():
             todos = all(c.isChecked() for c in self._checkboxes_meses)
-            btn_sel_todos.setText(
-                "Limpar seleção" if todos else "Selecionar todos"
-            )
-
+            btn_sel_todos.setText("Limpar seleção" if todos else "Selecionar todos")
+ 
         for chk in self._checkboxes_meses:
             chk.stateChanged.connect(lambda _: _sync_label())
-
         btn_sel_todos.clicked.connect(_toggle_selecao)
-
+ 
         sel_layout = QHBoxLayout()
         sel_layout.addStretch()
         sel_layout.addWidget(btn_sel_todos)
-        container_layout.addLayout(sel_layout)
-
+        pm_layout.addLayout(sel_layout)
+ 
+        stacked.addWidget(painel_meses)   # índice 0
+ 
+        # ── Painel 1: seleção por período (QDateEdit) ──────────────────────
+        painel_periodo = QWidget()
+        pp_layout = QGridLayout(painel_periodo)
+        pp_layout.setContentsMargins(20, 10, 20, 10)
+        pp_layout.setSpacing(10)
+ 
+        estilo_date = """
+            QDateEdit {
+                border: 1px solid #ccc; border-radius: 4px;
+                padding: 5px; font-size: 12px;
+            }
+        """
+ 
+        lbl_di = QLabel("Data início:")
+        lbl_di.setStyleSheet("font-size: 12px; color: #343a40;")
+        pp_layout.addWidget(lbl_di, 0, 0)
+ 
+        self._date_inicio = QDateEdit()
+        self._date_inicio.setCalendarPopup(True)
+        self._date_inicio.setDisplayFormat("dd/MM/yyyy")
+        # Padrão: 1º dia do mês anterior
+        self._date_inicio.setDate(QDate(hoje.year, hoje.month, 1).addMonths(-1))
+        self._date_inicio.setStyleSheet(estilo_date)
+        pp_layout.addWidget(self._date_inicio, 0, 1)
+ 
+        lbl_df = QLabel("Data fim:")
+        lbl_df.setStyleSheet("font-size: 12px; color: #343a40;")
+        pp_layout.addWidget(lbl_df, 1, 0)
+ 
+        self._date_fim = QDateEdit()
+        self._date_fim.setCalendarPopup(True)
+        self._date_fim.setDisplayFormat("dd/MM/yyyy")
+        # Padrão: último dia do mês anterior
+        self._date_fim.setDate(QDate(hoje.year, hoje.month, 1).addDays(-1))
+        self._date_fim.setStyleSheet(estilo_date)
+        pp_layout.addWidget(self._date_fim, 1, 1)
+ 
+        lbl_info = QLabel(
+            "ℹ️ O outorgado será calculado pro-rata\n"
+            "com base nos dias do intervalo selecionado."
+        )
+        lbl_info.setStyleSheet("font-size: 10px; color: #6c757d; margin-top: 5px;")
+        pp_layout.addWidget(lbl_info, 2, 0, 1, 2)
+ 
+        stacked.addWidget(painel_periodo)  # índice 1
+ 
+        container_layout.addWidget(stacked)
+ 
+        # Conectar RadioButtons → QStackedWidget
+        self._radio_meses.toggled.connect(
+            lambda checked: stacked.setCurrentIndex(0) if checked else None
+        )
+        self._radio_periodo.toggled.connect(
+            lambda checked: stacked.setCurrentIndex(1) if checked else None
+        )
+ 
         # Aviso de validação
         self.lbl_aviso_selecao = QLabel("⚠️ Selecione pelo menos um período!")
         self.lbl_aviso_selecao.setAlignment(Qt.AlignCenter)
@@ -512,13 +606,13 @@ class JanelaMonitoramento(QWidget):
         )
         self.lbl_aviso_selecao.setVisible(False)
         container_layout.addWidget(self.lbl_aviso_selecao)
-
+ 
         layout.addWidget(container)
-
-        # Botões
+ 
+        # ── Botões Não / Sim ───────────────────────────────────────────────
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
-
+ 
         btn_nao = QPushButton("Não")
         btn_nao.setCursor(Qt.PointingHandCursor)
         btn_nao.setStyleSheet(f"""
@@ -532,7 +626,7 @@ class JanelaMonitoramento(QWidget):
         """)
         btn_nao.clicked.connect(dialog.reject)
         btn_layout.addWidget(btn_nao)
-
+ 
         btn_sim = QPushButton("Sim, verificar")
         btn_sim.setCursor(Qt.PointingHandCursor)
         btn_sim.setStyleSheet(f"""
@@ -544,64 +638,114 @@ class JanelaMonitoramento(QWidget):
             QPushButton:hover {{ background-color: {ui_tema.StyleConfig.SECONDARY_COLOR}; }}
             QPushButton:disabled {{ background-color: #cccccc; color: #666666; }}
         """)
-
+ 
         def validar_e_prosseguir():
-            selecionados = [
-                self._meses_opcoes[i]
-                for i, chk in enumerate(self._checkboxes_meses)
-                if chk.isChecked()
-            ]
-            if not selecionados:
-                self.lbl_aviso_selecao.setVisible(True)
-                container.setStyleSheet(f"""
-                    QFrame#ContainerBranco {{
-                        background-color: {ui_tema.StyleConfig.BACKGROUND_WHITE};
-                        border-radius: 15px; border: 2px solid #dc3545; padding: 20px;
-                    }}
-                """)
-                QTimer.singleShot(200, lambda: container.setStyleSheet(f"""
-                    QFrame#ContainerBranco {{
-                        background-color: {ui_tema.StyleConfig.BACKGROUND_WHITE};
-                        border-radius: 15px;
-                        border: 1px solid {ui_tema.StyleConfig.BORDER_COLOR};
-                        padding: 20px;
-                    }}
-                """))
-                return
-            self.lbl_aviso_selecao.setVisible(False)
-            self.meses_para_verificar = selecionados
+            # ── Modo: 6 últimos meses ──────────────────────────────────────
+            if self._radio_meses.isChecked():
+                selecionados = [
+                    self._meses_opcoes[i]
+                    for i, chk in enumerate(self._checkboxes_meses)
+                    if chk.isChecked()
+                ]
+                if not selecionados:
+                    self.lbl_aviso_selecao.setText("⚠️ Selecione pelo menos um período!")
+                    self.lbl_aviso_selecao.setVisible(True)
+                    container.setStyleSheet(f"""
+                        QFrame#ContainerBranco {{
+                            background-color: {ui_tema.StyleConfig.BACKGROUND_WHITE};
+                            border-radius: 15px; border: 2px solid #dc3545; padding: 20px;
+                        }}
+                    """)
+                    QTimer.singleShot(200, lambda: container.setStyleSheet(f"""
+                        QFrame#ContainerBranco {{
+                            background-color: {ui_tema.StyleConfig.BACKGROUND_WHITE};
+                            border-radius: 15px;
+                            border: 1px solid {ui_tema.StyleConfig.BORDER_COLOR};
+                            padding: 20px;
+                        }}
+                    """))
+                    return
+                self.lbl_aviso_selecao.setVisible(False)
+                self.meses_para_verificar = selecionados
+                self._modo_verificacao    = 'mensal'
+ 
+            # ── Modo: por período ──────────────────────────────────────────
+            else:
+                from datetime import date as _date
+                qi = self._date_inicio.date()
+                qf = self._date_fim.date()
+                di = _date(qi.year(), qi.month(), qi.day())
+                df = _date(qf.year(), qf.month(), qf.day())
+                if di > df:
+                    self.lbl_aviso_selecao.setText(
+                        "⚠️ Data início deve ser anterior à data fim!"
+                    )
+                    self.lbl_aviso_selecao.setVisible(True)
+                    return
+                self.lbl_aviso_selecao.setVisible(False)
+                label = f"{di.strftime('%d/%m/%Y')} a {df.strftime('%d/%m/%Y')}"
+                self.meses_para_verificar = [{
+                    'mes':         di.month,
+                    'ano':         di.year,
+                    'nome':        label,
+                    'label':       label,
+                    'tipo':        'periodo',
+                    'data_inicio': di,
+                    'data_fim':    df,
+                }]
+                self._modo_verificacao = 'por_periodo'
+ 
             dialog.accept()
             self._confirmar_tempo_processamento_selecao()
-
+ 
         btn_sim.clicked.connect(validar_e_prosseguir)
         btn_layout.addWidget(btn_sim)
         layout.addLayout(btn_layout)
-
+ 
         shadow = QGraphicsDropShadowEffect(dialog)
         shadow.setBlurRadius(15)
         shadow.setXOffset(0)
         shadow.setYOffset(4)
         shadow.setColor(QColor(0, 0, 0, 30))
         dialog.setGraphicsEffect(shadow)
-
+ 
         if dialog.exec_() == QDialog.Rejected:
             print("[INFO] Usuário optou por não verificar consumo outorgado")
-            
+
+    @staticmethod
+    def _rotulo_periodo(item, campo_nome='nome_mes', campo_ano='ano'):
+        """Retorna o rótulo correto para exibição, sem duplicar o ano no modo
+        por_periodo.
+ 
+        No modo 'por_periodo' o campo nome já carrega o intervalo completo
+        (ex.: '01/02/2026 a 28/02/2026'); concatenar /{ano} duplicaria o ano.
+        No modo mensal o comportamento original é mantido (ex.: 'Fevereiro/2026').
+        """
+        nome = item.get(campo_nome, '')
+        ano  = item.get(campo_ano, 0)
+        if item.get('tipo') == 'periodo' or item.get('modo') == 'por_periodo':
+            return nome
+        return f"{nome}/{ano}" if ano else nome
+          
     def _confirmar_tempo_processamento_selecao(self):
-        """Segunda confirmação: lista os meses e pede confirmação."""
+        """Segunda confirmação: lista os períodos selecionados e pede confirmação."""
         meses      = self.meses_para_verificar
         quantidade = len(meses)
-        texto_meses = "<br>• ".join(f"{m['nome']}/{m['ano']}" for m in meses)
-
+        texto_meses = "<br>• ".join(
+            m['nome'] if m.get('tipo') == 'periodo'
+            else f"{m['nome']}/{m['ano']}"
+            for m in meses
+        )
+ 
         dialog = QDialog(self)
         dialog.setWindowTitle("Atenção")
         dialog.setMinimumSize(340, 260)
         dialog.setModal(True)
-
+ 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
-
+ 
         container = QFrame()
         container.setStyleSheet("""
             QFrame {
@@ -611,14 +755,14 @@ class JanelaMonitoramento(QWidget):
         """)
         cl = QVBoxLayout(container)
         cl.setSpacing(10)
-
+ 
         lbl_icon = QLabel("⚠️")
         lbl_icon.setAlignment(Qt.AlignCenter)
         lbl_icon.setStyleSheet("font-size: 36px; color: #856404; background: transparent;")
         cl.addWidget(lbl_icon)
-
+ 
         mensagem = QLabel(
-            f"A verificação analisará todas as interferências do(s) mês(es):<br>"
+            f"A verificação analisará todas as interferências do(s) período(s):<br>"
             f"<b>• {texto_meses}</b><br><br>"
             f"comparando consumo real vs. outorgado.<br><br>"
             f"<span style='color: #856404;'>Deseja continuar?</span>"
@@ -631,10 +775,10 @@ class JanelaMonitoramento(QWidget):
         """)
         cl.addWidget(mensagem)
         layout.addWidget(container)
-
+ 
         btn_layout = QHBoxLayout()
         btn_layout.setSpacing(15)
-
+ 
         btn_nao = QPushButton("Não")
         btn_nao.setCursor(Qt.PointingHandCursor)
         btn_nao.setStyleSheet("""
@@ -647,7 +791,7 @@ class JanelaMonitoramento(QWidget):
         """)
         btn_nao.clicked.connect(dialog.reject)
         btn_layout.addWidget(btn_nao)
-
+ 
         btn_sim = QPushButton("Sim, continuar")
         btn_sim.setCursor(Qt.PointingHandCursor)
         btn_sim.setStyleSheet("""
@@ -661,12 +805,12 @@ class JanelaMonitoramento(QWidget):
         btn_sim.clicked.connect(dialog.accept)
         btn_layout.addWidget(btn_sim)
         layout.addLayout(btn_layout)
-
+ 
         shadow = QGraphicsDropShadowEffect(dialog)
         shadow.setBlurRadius(15); shadow.setXOffset(0); shadow.setYOffset(4)
         shadow.setColor(QColor(0, 0, 0, 30))
         dialog.setGraphicsEffect(shadow)
-
+ 
         if dialog.exec_() == QDialog.Accepted:
             self._iniciar_verificacao_selecionados()
         else:
@@ -676,27 +820,35 @@ class JanelaMonitoramento(QWidget):
         """Monta a fila e inicia o processamento."""
         self._cancelado = False
         self.fila_processamento = [
-            {'mes': m['mes'], 'ano': m['ano'], 'nome_mes': m['nome'], 'tipo': m['tipo']}
+            {
+                'mes':         m['mes'],
+                'ano':         m['ano'],
+                'nome_mes':    m['nome'],
+                'tipo':        m['tipo'],
+                'modo':        getattr(self, '_modo_verificacao', 'mensal'),
+                'data_inicio': m.get('data_inicio'),
+                'data_fim':    m.get('data_fim'),
+            }
             for m in self.meses_para_verificar
         ]
         self.resultados_processamento = {}
-
+ 
         n = len(self.fila_processamento)
-
+ 
         self.progress_dialog = QDialog(self)
         self.progress_dialog.setWindowTitle("Processando...")
         self.progress_dialog.setMinimumSize(450, 240 + max(0, n - 2) * 24)
         self.progress_dialog.setModal(True)
-
+ 
         try:
             ui_tema.aplicar_tema_arredondado(self.progress_dialog)
         except Exception:
             pass
-
+ 
         layout = QVBoxLayout(self.progress_dialog)
         layout.setContentsMargins(15, 15, 15, 15)
         layout.setSpacing(10)
-
+ 
         container = QFrame()
         container.setObjectName("ContainerBranco")
         container.setStyleSheet(f"""
@@ -709,7 +861,7 @@ class JanelaMonitoramento(QWidget):
         """)
         cl = QVBoxLayout(container)
         cl.setSpacing(12)
-
+ 
         self.lbl_icon = QLabel("⏳")
         self.lbl_icon.setAlignment(Qt.AlignCenter)
         self.lbl_icon.setStyleSheet(f"""
@@ -717,7 +869,7 @@ class JanelaMonitoramento(QWidget):
             background: transparent; padding: 10px;
         """)
         cl.addWidget(self.lbl_icon)
-
+ 
         titulo = QLabel("Verificando Interferências")
         titulo.setAlignment(Qt.AlignCenter)
         titulo.setStyleSheet(f"""
@@ -726,7 +878,7 @@ class JanelaMonitoramento(QWidget):
             background: transparent; font-family: 'Segoe UI', sans-serif;
         """)
         cl.addWidget(titulo)
-
+ 
         self.lbl_mes_atual_processando = QLabel()
         self.lbl_mes_atual_processando.setAlignment(Qt.AlignCenter)
         self.lbl_mes_atual_processando.setStyleSheet(f"""
@@ -736,9 +888,13 @@ class JanelaMonitoramento(QWidget):
             font-family: 'Segoe UI', sans-serif;
         """)
         cl.addWidget(self.lbl_mes_atual_processando)
-
+ 
+        # Rótulo correto na fila de progresso
         linhas_fila = "<b>Fila de processamento:</b><br>" + "".join(
-            f"<span style='color:#6c757d;'>• {m['nome_mes']}/{m['ano']}</span><br>"
+            f"<span style='color:#6c757d;'>• "
+            + (m['nome_mes'] if m.get('modo') == 'por_periodo'
+               else f"{m['nome_mes']}/{m['ano']}")
+            + "</span><br>"
             for m in self.fila_processamento
         )
         self.lbl_mensagem = QLabel(linhas_fila)
@@ -750,7 +906,7 @@ class JanelaMonitoramento(QWidget):
             font-family: 'Segoe UI', sans-serif;
         """)
         cl.addWidget(self.lbl_mensagem)
-
+ 
         if n > 1:
             self.progress_bar = QProgressBar()
             self.progress_bar.setRange(0, n)
@@ -765,9 +921,9 @@ class JanelaMonitoramento(QWidget):
             cl.addWidget(self.progress_bar)
         else:
             self.progress_bar = None
-
+ 
         layout.addWidget(container)
-
+ 
         btn_cancelar = QPushButton("Cancelar")
         btn_cancelar.setCursor(Qt.PointingHandCursor)
         btn_cancelar.setStyleSheet("""
@@ -780,59 +936,61 @@ class JanelaMonitoramento(QWidget):
         """)
         btn_cancelar.clicked.connect(self._on_verificacao_cancelada)
         layout.addWidget(btn_cancelar, alignment=Qt.AlignCenter)
-
+ 
         shadow = QGraphicsDropShadowEffect(self.progress_dialog)
         shadow.setBlurRadius(15); shadow.setXOffset(0); shadow.setYOffset(4)
         shadow.setColor(QColor(0, 0, 0, 30))
         self.progress_dialog.setGraphicsEffect(shadow)
-
+ 
         self.progress_dialog.show()
         QApplication.setOverrideCursor(Qt.WaitCursor)
         self._processar_proximo_da_fila()
         return True
-        
+  
     def _processar_proximo_da_fila(self):
         """Processa o próximo item da fila de verificação."""
-        
+ 
         if not self.fila_processamento or self._cancelado:
-            # Fila vazia ou cancelado - finalizar
             self._finalizar_processamento_fila()
             return
-        
-        # Pegar próximo item
+ 
         item_atual = self.fila_processamento.pop(0)
         self.item_atual_processamento = item_atual
-        
-        # Atualizar mensagem de progresso
+ 
         self._atualizar_mensagem_progresso(item_atual, 'processando')
-        
-        # Criar thread de trabalho
+ 
+        # Repassa modo e datas à thread
         self.worker_thread_atual = VerificacaoOutorgadoThread(
-            self.conn, 
-            item_atual['mes'], 
+            self.conn,
+            item_atual['mes'],
             item_atual['ano'],
             item_atual['nome_mes'],
-            self.senha
+            self.senha,
+            modo=item_atual.get('modo', 'mensal'),
+            data_inicio=item_atual.get('data_inicio'),
+            data_fim=item_atual.get('data_fim'),
         )
-        
-        # Conectar sinais
+ 
         self.worker_thread_atual.resultado_signal.connect(
             lambda dados, mes, ano: self._on_item_fila_concluido(dados, mes, ano, item_atual['tipo'])
         )
         self.worker_thread_atual.erro_signal.connect(self._on_verificacao_erro)
         self.worker_thread_atual.progresso_signal.connect(self._on_progresso_atualizado)
         self.worker_thread_atual.finished.connect(self._processar_proximo_da_fila)
-        
-        # Iniciar thread
+ 
         self.worker_thread_atual.start()
-
+ 
     def _atualizar_mensagem_progresso(self, item_atual, status):
-        """Atualiza o indicador visual do mês em processamento."""
+        """Atualiza o indicador visual do período em processamento."""
+        # Rótulo sem duplicar o ano no modo por_periodo
+        rotulo = (
+            item_atual['nome_mes'] if item_atual.get('modo') == 'por_periodo'
+            else f"{item_atual['nome_mes']}/{item_atual['ano']}"
+        )
+ 
         if hasattr(self, 'lbl_mes_atual_processando') and self.lbl_mes_atual_processando:
             if status == 'processando':
-                self.lbl_mes_atual_processando.setText(
-                    f"▶ PROCESSANDO: {item_atual['nome_mes']}/{item_atual['ano']}"
-                )
+                self.lbl_mes_atual_processando.setText(f"▶ PROCESSANDO: {rotulo}")
                 self.lbl_mes_atual_processando.setStyleSheet(f"""
                     font-size: 14px; font-weight: bold;
                     color: #ffffff; background-color: #175cc3;
@@ -840,60 +998,62 @@ class JanelaMonitoramento(QWidget):
                     border: 2px solid #175cc3; font-family: 'Segoe UI', sans-serif;
                 """)
             else:
-                self.lbl_mes_atual_processando.setText(
-                    f"✓ CONCLUÍDO: {item_atual['nome_mes']}/{item_atual['ano']}"
-                )
+                self.lbl_mes_atual_processando.setText(f"✓ CONCLUÍDO: {rotulo}")
                 self.lbl_mes_atual_processando.setStyleSheet(f"""
                     font-size: 14px; font-weight: bold;
                     color: #155724; background-color: #d4edda;
                     border-radius: 8px; padding: 8px 15px;
                     border: 2px solid #28a745; font-family: 'Segoe UI', sans-serif;
                 """)
-
+ 
         if hasattr(self, 'progress_bar') and self.progress_bar and status == 'concluido':
             self.progress_bar.setValue(self.progress_bar.value() + 1)
-
+ 
         meses     = getattr(self, 'meses_para_verificar', [])
         concluidos = set(getattr(self, 'resultados_processamento', {}).keys())
-
+ 
         if len(meses) <= 1:
             if status == 'processando':
                 msg = (
-                    f"<b>Analisando:</b> {item_atual['nome_mes']}/{item_atual['ano']}<br>"
+                    f"<b>Analisando:</b> {rotulo}<br>"
                     f"<span style='color:#175cc3;font-weight:bold;'>▶ Em andamento...</span><br><br>"
                     f"<span style='color:#666;font-size:11px;'>Aguarde...</span>"
                 )
             else:
                 msg = (
-                    f"<b>Concluído:</b> {item_atual['nome_mes']}/{item_atual['ano']}<br>"
+                    f"<b>Concluído:</b> {rotulo}<br>"
                     f"<span style='color:#28a745;'>✓ Verificação finalizada</span><br><br>"
                     f"<span style='color:#666;font-size:11px;'>Preparando resultados...</span>"
                 )
             if hasattr(self, 'lbl_mensagem') and self.lbl_mensagem:
                 self.lbl_mensagem.setText(msg)
             return
-
+ 
         linhas = ["<b>Fila de processamento:</b><br>"]
         for pos, opcao in enumerate(meses, 1):
-            tipo  = opcao['tipo']
-            label = f"{opcao['nome']}/{opcao['ano']}"
+            tipo        = opcao['tipo']
+            # Rótulo correto para cada item da fila
+            label_opcao = (
+                opcao['nome'] if tipo == 'periodo'
+                else f"{opcao['nome']}/{opcao['ano']}"
+            )
             if tipo == item_atual['tipo']:
-                cor   = "#175cc3" if status == 'processando' else "#28a745"
-                icone = "▶" if status == 'processando' else "✓"
+                cor    = "#175cc3" if status == 'processando' else "#28a745"
+                icone  = "▶" if status == 'processando' else "✓"
                 estado = "processando..." if status == 'processando' else "concluído"
                 linhas.append(
                     f"<span style='color:{cor};font-weight:bold;'>"
-                    f"{icone} {pos}. {label} ({estado})</span><br>"
+                    f"{icone} {pos}. {label_opcao} ({estado})</span><br>"
                 )
             elif tipo in concluidos:
                 linhas.append(
-                    f"<span style='color:#28a745;'>✓ {pos}. {label} (concluído)</span><br>"
+                    f"<span style='color:#28a745;'>✓ {pos}. {label_opcao} (concluído)</span><br>"
                 )
             else:
                 linhas.append(
-                    f"<span style='color:#6c757d;'>{pos}. {label} (aguardando...)</span><br>"
+                    f"<span style='color:#6c757d;'>{pos}. {label_opcao} (aguardando...)</span><br>"
                 )
-
+ 
         linhas.append(
             "<br><span style='color:#666;font-size:11px;'>Processando em sequência. Aguarde...</span>"
         )
@@ -1000,16 +1160,16 @@ class JanelaMonitoramento(QWidget):
         )
                   
     def mostrar_alerta_consumo_abas(self, lista_meses):
-        """Exibe resultados em abas, uma por mês."""
+        """Exibe resultados em abas, uma por mês/período."""
         dialog = QDialog(self)
         dialog.setWindowTitle("⚠️ Alerta - Consumo Acima do Outorgado")
         dialog.setMinimumSize(1100, 600)
         dialog.setModal(False)
-
+ 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(15)
-
+ 
         # Cabeçalho
         header = QWidget()
         header.setStyleSheet("""
@@ -1019,13 +1179,16 @@ class JanelaMonitoramento(QWidget):
             }
         """)
         hl = QVBoxLayout(header)
-
+ 
         titulo = QLabel("⚠️ Interferências com Consumo Acima do Volume Outorgado")
         titulo.setStyleSheet("font-size: 16px; font-weight: bold; color: #856404;")
         hl.addWidget(titulo)
-
+ 
+        # Rótulo correto no subtítulo: sem duplicar o ano no modo por_periodo
         partes = [
-            f"<b>{d['nome_mes']}/{d['ano']}:</b> {len(d['resultados'])} alerta(s)"
+            f"<b>"
+            + (d['nome_mes'] if not d.get('ano') else f"{d['nome_mes']}/{d['ano']}")
+            + f":</b> {len(d['resultados'])} alerta(s)"
             for d in lista_meses if d and d.get('resultados') is not None
         ]
         subtitulo = QLabel(
@@ -1036,7 +1199,7 @@ class JanelaMonitoramento(QWidget):
         subtitulo.setStyleSheet("font-size: 12px; color: #856404; margin-top: 5px;")
         hl.addWidget(subtitulo)
         layout.addWidget(header)
-
+ 
         # Abas
         self.tab_widget = QTabWidget()
         self.tab_widget.setStyleSheet("""
@@ -1055,11 +1218,16 @@ class JanelaMonitoramento(QWidget):
             }
             QTabBar::tab:hover:!selected { background-color: #e9ecef; color: #495057; }
         """)
-
+ 
         self.tabelas_abas = {}
         self.dados_abas   = {}
         self.ordem_abas   = {}
-
+ 
+        # Oculta a barra de abas quando há apenas um resultado
+        lista_validos = [d for d in lista_meses if d and d.get('resultados') is not None]
+        if len(lista_validos) == 1:
+            self.tab_widget.tabBar().setVisible(False)
+ 
         for idx, dados_mes in enumerate(lista_meses):
             if dados_mes and dados_mes.get('resultados') is not None:
                 identificador = f"mes_{idx}"
@@ -1070,13 +1238,15 @@ class JanelaMonitoramento(QWidget):
                     dados_mes['ano'],
                     identificador,
                 )
-                self.tab_widget.addTab(
-                    aba,
-                    f"{dados_mes['nome_mes']}/{dados_mes['ano']} ({n})"
+                # Rótulo da aba: sem duplicar o ano no modo por_periodo
+                rotulo_aba = (
+                    dados_mes['nome_mes'] if not dados_mes.get('ano')
+                    else f"{dados_mes['nome_mes']}/{dados_mes['ano']}"
                 )
-
+                self.tab_widget.addTab(aba, f"{rotulo_aba} ({n})")
+ 
         layout.addWidget(self.tab_widget)
-
+ 
         # Legenda
         leg_layout = QHBoxLayout()
         leg_critico = QLabel("⬤ Alerta Crítico (>100% do outorgado)")
@@ -1084,10 +1254,10 @@ class JanelaMonitoramento(QWidget):
         leg_layout.addWidget(leg_critico)
         leg_layout.addStretch()
         layout.addLayout(leg_layout)
-
+ 
         # Botões
         btn_layout = QHBoxLayout()
-
+ 
         btn_exportar = QPushButton("Exportar para Excel")
         btn_exportar.setStyleSheet(f"""
             QPushButton {{
@@ -1102,7 +1272,7 @@ class JanelaMonitoramento(QWidget):
         )
         btn_layout.addWidget(btn_exportar)
         btn_layout.addStretch()
-
+ 
         btn_fechar = QPushButton("Fechar")
         btn_fechar.setStyleSheet("""
             QPushButton {
@@ -1113,7 +1283,7 @@ class JanelaMonitoramento(QWidget):
         """)
         btn_fechar.clicked.connect(dialog.close)
         btn_layout.addWidget(btn_fechar)
-
+ 
         layout.addLayout(btn_layout)
         dialog.finished.connect(lambda: self._limpar_referencias_alerta_abas())
         self.dialog_alerta = dialog
@@ -1121,17 +1291,17 @@ class JanelaMonitoramento(QWidget):
         self._janelas_abertas.append(self.dialog_alerta)
         
     def _criar_aba_mes(self, dados, nome_mes, ano, identificador_aba):
-        """Cria aba com tabela de 7 colunas para um mês."""
+        """Cria aba com tabela de 8 colunas para um mês/período."""
         aba = QWidget()
         al  = QVBoxLayout(aba)
         al.setContentsMargins(10, 10, 10, 10)
         al.setSpacing(5)
-
+ 
         tabela = QTableWidget()
-        tabela.setColumnCount(7)
+        tabela.setColumnCount(8)
         tabela.setHorizontalHeaderLabels([
             "INT_CD", "CNARH", "Usuário", "Operador",
-            "Medidor(es)", "Consumo (m³)", "Outorgado (m³)",
+            "Medidor(es)", "Consumo (m³)", "Outorgado (m³)", "% Acrescido",
         ])
         tabela.setStyleSheet("""
             QTableWidget { border: none; gridline-color: #dee2e6; }
@@ -1144,14 +1314,14 @@ class JanelaMonitoramento(QWidget):
             QTableWidget::item { padding: 6px; border-bottom: 1px solid #dee2e6; }
             QTableWidget::item:selected { background-color: #e3f2fd; color: #175cc3; }
         """)
-
+ 
         self.dados_abas[identificador_aba] = {
             'original': list(dados), 'atual': list(dados),
             'nome_mes': nome_mes, 'ano': ano,
         }
         self.ordem_abas[identificador_aba]   = {'coluna': None, 'decrescente': False}
         self.tabelas_abas[identificador_aba] = tabela
-
+ 
         tabela.horizontalHeader().setSectionsClickable(True)
         tabela.horizontalHeader().sectionClicked.connect(
             lambda col, id_aba=identificador_aba: self._ordenar_tabela_aba(col, id_aba)
@@ -1160,9 +1330,9 @@ class JanelaMonitoramento(QWidget):
             lambda item, id_aba=identificador_aba, nm=nome_mes, a=ano:
                 self._on_interferencia_clicada_aba(item, id_aba, nm, a)
         )
-
+ 
         self._preencher_tabela_aba(identificador_aba)
-
+ 
         hdr = tabela.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
@@ -1171,27 +1341,36 @@ class JanelaMonitoramento(QWidget):
         hdr.setSectionResizeMode(4, QHeaderView.Stretch)
         hdr.setSectionResizeMode(5, QHeaderView.ResizeToContents)
         hdr.setSectionResizeMode(6, QHeaderView.ResizeToContents)
-
+        hdr.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # % Acrescido
+ 
         tabela.setAlternatingRowColors(True)
         tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
         tabela.setEditTriggers(QAbstractItemView.NoEditTriggers)
-
+ 
         al.addWidget(tabela)
         return aba
         
     def _preencher_tabela_aba(self, identificador_aba):
-        """Preenche a tabela de uma aba."""
+        """Preenche a tabela de uma aba (8 colunas, incluindo % Acrescido)."""
         tabela = self.tabelas_abas.get(identificador_aba)
         dados  = self.dados_abas.get(identificador_aba, {}).get('atual', [])
         if not tabela or not dados:
             return
-
+ 
         fmt = lambda v: f"{float(v):,.2f}".replace(",","X").replace(".",",").replace("X",".")
         tabela.setRowCount(len(dados))
-
+ 
         for row_idx, row_data in enumerate(dados):
-            (cod_interf, cnarh, usuario, operador, rotulos, consumo, outorgado) = row_data
-
+            # Unpacking seguro: suporta tuplas de 7 (legado) ou 8 elementos (novo)
+            cod_interf, cnarh, usuario, operador, rotulos, consumo, outorgado = row_data[:7]
+            outorgado_f = float(outorgado) if outorgado else 0.0
+            consumo_f   = float(consumo)   if consumo   else 0.0
+            # Percentual vem da thread (pos 7) ou é calculado como fallback
+            percentual  = float(row_data[7]) if len(row_data) > 7 else (
+                round((consumo_f / outorgado_f - 1.0) * 100.0, 1) if outorgado_f > 0 else 0.0
+            )
+ 
+            # Colunas de texto: INT_CD, CNARH, Usuário, Operador, Medidor(es)
             for col, val in enumerate([cod_interf, cnarh, usuario, operador, rotulos]):
                 item = QTableWidgetItem(str(val) if val else "N/A")
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
@@ -1199,33 +1378,44 @@ class JanelaMonitoramento(QWidget):
                     int(val) if col == 0 and val and str(val).isdigit()
                     else str(val).lower() if val else "")
                 tabela.setItem(row_idx, col, item)
-
-            # Consumo
+ 
+            # Consumo (col 5)
             item = QTableWidgetItem(fmt(consumo))
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setForeground(QColor("#dc3545"))
             item.setFont(QFont("Arial", 9, QFont.Bold))
-            item.setData(Qt.UserRole, float(consumo) if consumo else 0.0)
+            item.setData(Qt.UserRole, consumo_f)
             tabela.setItem(row_idx, 5, item)
-
-            # Outorgado
+ 
+            # Outorgado (col 6)
             item = QTableWidgetItem(fmt(outorgado))
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setForeground(QColor("#28a745"))
-            item.setData(Qt.UserRole, float(outorgado) if outorgado else 0.0)
+            item.setData(Qt.UserRole, outorgado_f)
             tabela.setItem(row_idx, 6, item)
-
-            if outorgado and float(consumo) > (float(outorgado) * 1.2):
-                for col in range(7):
+ 
+            # % Acrescido (col 7)
+            pct_txt = f"+{percentual:.1f}%".replace(".", ",")
+            item = QTableWidgetItem(pct_txt)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setTextAlignment(Qt.AlignCenter)
+            item.setForeground(QColor("#dc3545"))
+            item.setFont(QFont("Arial", 9, QFont.Bold))
+            item.setData(Qt.UserRole, percentual)
+            tabela.setItem(row_idx, 7, item)
+ 
+            # Destaque de linha: consumo > outorgado (limiar 100%)
+            if outorgado_f > 0 and consumo_f > outorgado_f:
+                for col in range(tabela.columnCount()):
                     tabela.item(row_idx, col).setBackground(QColor("#f8d7da"))
                     
     def _ordenar_tabela_aba(self, coluna, identificador_aba):
         dados_info = self.dados_abas.get(identificador_aba)
         if not dados_info:
             return
-
+ 
         # (cod_interf[0], cnarh[1], usuario[2], operador[3], rotulos[4],
-        #  consumo[5], outorgado[6])
+        #  consumo[5], outorgado[6], percentual[7])
         chaves = {
             0: lambda x: int(x[0]) if x[0] and str(x[0]).isdigit() else 0,
             1: lambda x: str(x[1] or "").lower(),
@@ -1234,6 +1424,7 @@ class JanelaMonitoramento(QWidget):
             4: lambda x: str(x[4] or "").lower(),
             5: lambda x: float(x[5] or 0),
             6: lambda x: float(x[6] or 0),
+            7: lambda x: float(x[7]) if len(x) > 7 else 0.0,
         }
         ordem = self.ordem_abas.get(identificador_aba, {'coluna': None, 'decrescente': False})
         if ordem['coluna'] == coluna:
@@ -1241,7 +1432,7 @@ class JanelaMonitoramento(QWidget):
         else:
             ordem['coluna'] = coluna; ordem['decrescente'] = False
         self.ordem_abas[identificador_aba] = ordem
-
+ 
         dados_info['atual'].sort(
             key=chaves.get(coluna, lambda x: str(x[0]).lower()),
             reverse=ordem['decrescente']
@@ -1255,7 +1446,7 @@ class JanelaMonitoramento(QWidget):
             return
         titulos = [
             "INT_CD", "CNARH", "Usuário", "Operador",
-            "Medidor(es)", "Consumo (m³)", "Outorgado (m³)",
+            "Medidor(es)", "Consumo (m³)", "Outorgado (m³)", "% Acrescido",
         ]
         ind = " ▼" if decrescente else " ▲"
         tabela.setHorizontalHeaderLabels([
