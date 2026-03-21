@@ -27,7 +27,7 @@ from qgis.PyQt.QtWidgets import (
     QFrame, QMessageBox, QSizePolicy, QAbstractItemView,
     QHeaderView, QListWidget, QListWidgetItem, QScrollArea,
     QDialog, QDialogButtonBox, QApplication,
-    QDateEdit, QCheckBox, QGroupBox,
+    QDateEdit, QCheckBox, QGroupBox, QRadioButton, QButtonGroup,
 )
 from qgis.PyQt.QtCore import Qt, QDate
  
@@ -218,7 +218,15 @@ class WidgetMedidores(QWidget):
         busca_layout.addWidget(self.combo_sugestoes)
         
         layout.addWidget(busca_container)
-        
+
+        # Label de contagem de resultados
+        self.lbl_contagem = QLabel("")
+        self.lbl_contagem.setStyleSheet(
+            "border: none; color: #5474b8; font-style: italic; font-size: 11px; padding: 0px 2px;"
+        )
+        self.lbl_contagem.setVisible(False)
+        layout.addWidget(self.lbl_contagem)
+
         # Lista de resultados com tamanho fixo e bordas arredondadas
         self.lista_resultados = QListWidget()
         self.lista_resultados.setMinimumHeight(80)
@@ -728,7 +736,10 @@ class WidgetMedidores(QWidget):
         self.vazao_ja_convertida = False
         self.potencia_ja_convertida = False
         self.ultimo_valor_vazao = None
-        self.ultimo_valor_potencia = None        
+        self.ultimo_valor_potencia = None
+
+        if hasattr(self, 'lbl_contagem'):
+            self.lbl_contagem.setVisible(False)        
     
     def atualizar_placeholder(self):
         """Atualiza o placeholder do campo de busca conforme o critério selecionado."""
@@ -824,7 +835,8 @@ class WidgetMedidores(QWidget):
                 QApplication.setOverrideCursor(Qt.WaitCursor)
                 
                 query = """
-                SELECT DISTINCT v.id, v.rotulo_medidor, v.nome_usuario, v.nome_operador
+                SELECT DISTINCT v.id, v.rotulo_medidor, v.nome_usuario, v.nome_operador,
+                       v.nu_interferencia_cnarh
                 FROM view_ft_intervencao v
                 JOIN ft_sishidrico_buffer s 
                     ON ST_Intersects(v.geom, ST_Transform(s.geom, 4326))
@@ -843,7 +855,8 @@ class WidgetMedidores(QWidget):
                 QApplication.setOverrideCursor(Qt.WaitCursor)
                 
                 query = """
-                SELECT DISTINCT v.id, v.rotulo_medidor, v.nome_usuario, v.nome_operador
+                SELECT DISTINCT v.id, v.rotulo_medidor, v.nome_usuario, v.nome_operador,
+                       v.nu_interferencia_cnarh
                 FROM view_ft_intervencao v
                 JOIN ft_uam_buffer s 
                     ON ST_Intersects(v.geom, ST_Transform(s.geom, 4326))
@@ -867,7 +880,8 @@ class WidgetMedidores(QWidget):
                         i.id,
                         i.rotulo as rotulo_medidor,
                         u.nome_usuario as nome_usuario,
-                        o.nome as nome_operador
+                        o.nome as nome_operador,
+                        u.codigo_interferencia as nu_interferencia_cnarh
                     FROM tb_intervencao i
                     LEFT JOIN tb_intervencao_interferencia a ON i.id = a.intervencao_id
                     LEFT JOIN tb_interferencia u ON a.interferencia_id = u.id
@@ -884,7 +898,8 @@ class WidgetMedidores(QWidget):
             else:
                 # -- Busca Textual Unificada (View) --
                 base_query = """
-                SELECT DISTINCT id, rotulo_medidor, nome_usuario, nome_operador
+                SELECT DISTINCT id, rotulo_medidor, nome_usuario, nome_operador,
+                       nu_interferencia_cnarh
                 FROM view_ft_intervencao
                 """
                 order_by = "ORDER BY rotulo_medidor;"                
@@ -909,10 +924,11 @@ class WidgetMedidores(QWidget):
             
             if not resultados:
                 self.lista_resultados.addItem("Nenhum resultado encontrado.")
+                self.lbl_contagem.setVisible(False)
                 return
             
             # Preenchimento da Lista
-            for id_medidor, rotulo, nome_usuario, operador_nome in resultados:
+            for id_medidor, rotulo, nome_usuario, operador_nome, *_ in resultados:
                 texto = f"{rotulo}"
                 if nome_usuario:
                     texto += f" - Usuário: {nome_usuario}"
@@ -921,6 +937,22 @@ class WidgetMedidores(QWidget):
                 item = QListWidgetItem(texto)
                 item.setData(Qt.UserRole, id_medidor)
                 self.lista_resultados.addItem(item)
+
+            # Contagem idêntica ao Excel: interferências distintas via nu_interferencia_cnarh (r[4])
+            nu_interf_distintas = len({r[4] for r in resultados if r[4]})
+            self.lbl_contagem.setText(
+                f"Total: {len(resultados)} medidor(es)  |  {nu_interf_distintas} interferência(s)"
+            )
+            self.lbl_contagem.setVisible(True)
+
+            #nu_interf = len({item.text().split(" - ")[0] for item in
+            #                 [self.lista_resultados.item(i)
+            #                  for i in range(self.lista_resultados.count())]
+            #                 if item.data(Qt.UserRole)})
+            #self.lbl_contagem.setText(
+            #    f"Total: {len(resultados)} medidor(es)  |  {nu_interf} interferência(s)"
+            #)
+            #self.lbl_contagem.setVisible(True)
                 
         except Exception as e:
             # Garante que o cursor seja restaurado em caso de erro
@@ -972,7 +1004,7 @@ class WidgetMedidores(QWidget):
             
             if not resultados:
                 self.lista_resultados.addItem("Nenhum resultado encontrado.")
-                #self.btn_ver_mapa.setVisible(False)
+                self.btn_ver_mapa.setVisible(False)
                 return
             '''
             # Lógica do botão Ver no Mapa
@@ -989,7 +1021,10 @@ class WidgetMedidores(QWidget):
                 item = QListWidgetItem(texto)
                 item.setData(Qt.UserRole, id_medidor)
                 self.lista_resultados.addItem(item)
-                
+                self.lbl_contagem.setText(
+                    f"Total: {len(resultados)} medidor(es)"
+                )
+                self.lbl_contagem.setVisible(True)                
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro na busca: {e}")
         finally:
@@ -1875,54 +1910,140 @@ class WidgetMedidores(QWidget):
         # Quando busca E período estão marcados simultaneamente, pergunta ao usuário
         # como o arquivo de período deve ser gerado.
         if chk_busca.isChecked() and chk_periodo.isChecked():
-            fim_str  = data_fim.strftime('%d/%m/%Y') if data_fim else None
+            fim_str      = data_fim.strftime('%d/%m/%Y') if data_fim else None
             periodo_label = (
                 f"{data_inicio.strftime('%d/%m/%Y')} → {fim_str}"
                 if fim_str
                 else data_inicio.strftime('%d/%m/%Y')
             )
-            msg = QMessageBox(self)
-            msg.setWindowTitle("Exportação por período")
-            msg.setIcon(QMessageBox.Question)
-            msg.setText(
-                f"<b>Método de busca</b> e <b>período de atividade</b> estão "
-                f"marcados simultaneamente.<br><br>"
-                f"Como deseja gerar o arquivo de período "
-                f"<i>({periodo_label})</i>?"
+
+            # ── Diálogo customizado ───────────────────────────────────────────────
+            dlg2 = QDialog(self)
+            dlg2.setWindowTitle("Exportação por período")
+            dlg2.setMinimumWidth(480)
+            dlg2.setStyleSheet("""
+                QDialog { background-color: white; }
+                QLabel  { background: transparent; }
+                QRadioButton {
+                    font-size: 11px;
+                    color: #212529;
+                    background: transparent;
+                    spacing: 8px;
+                    padding: 4px 0px;
+                }
+                QRadioButton::indicator {
+                    width: 15px;
+                    height: 15px;
+                    border-radius: 8px;
+                    border: 2px solid #5474b8;
+                    background-color: white;
+                }
+                QRadioButton::indicator:checked {
+                    background-color: #5474b8;
+                    border: 2px solid #5474b8;
+                    image: none;
+                }
+                QRadioButton::indicator:hover {
+                    border-color: #175cc3;
+                }
+            """)
+
+            lay2 = QVBoxLayout(dlg2)
+            lay2.setSpacing(14)
+            lay2.setContentsMargins(20, 18, 20, 16)
+
+            # Texto da indagação
+            lbl_pergunta = QLabel(
+                f"Como o <b>método de busca</b> e o <b>período de atividade</b> estão "
+                f"marcados simultaneamente, como deseja gerar o arquivo de medidores "
+                f"ativos para o período <i>({periodo_label})</i>?"
             )
-            btn_independente = msg.addButton(
-                "Arquivos independentes", QMessageBox.AcceptRole
+            lbl_pergunta.setWordWrap(True)
+            lbl_pergunta.setStyleSheet("color: #212529; font-size: 11px; background: transparent;")
+            lay2.addWidget(lbl_pergunta)
+
+            # Separador
+            sep_top = QFrame()
+            sep_top.setFrameShape(QFrame.HLine)
+            sep_top.setStyleSheet("color: #dee2e6; margin: 2px 0;")
+            lay2.addWidget(sep_top)
+
+            # RadioButtons
+            grp_botoes = QButtonGroup(dlg2)
+
+            rb_independente = QRadioButton("Arquivo independente do método de busca")
+            #rb_independente.setStyleSheet("font-size: 11px; color: #212529; background: transparent;")
+
+            rb_vinculado = QRadioButton(
+                f"Arquivo vinculado ao método de busca  ({criterio_atual}: {valor_busca})"
             )
-            btn_filtrado = msg.addButton(
-                f"Apenas da busca atual  ({criterio_atual}: {valor_busca})",
-                QMessageBox.ActionRole
+            #rb_vinculado.setStyleSheet("font-size: 11px; color: #212529; background: transparent;")
+
+            grp_botoes.addButton(rb_independente)
+            grp_botoes.addButton(rb_vinculado)
+
+            lay2.addWidget(rb_independente)
+            lay2.addWidget(rb_vinculado)
+
+            # Separador
+            sep_bot = QFrame()
+            sep_bot.setFrameShape(QFrame.HLine)
+            sep_bot.setStyleSheet("color: #dee2e6; margin: 2px 0;")
+            lay2.addWidget(sep_bot)
+
+            # Botões Gerar Excel / Cancelar
+            btn_row2 = QHBoxLayout()
+            btn_row2.setSpacing(10)
+
+            btn_gerar2 = QPushButton("Gerar Excel")
+            btn_gerar2.setEnabled(False)
+            btn_gerar2.setFixedHeight(34)
+            btn_gerar2.setStyleSheet(
+                "QPushButton { background-color: #175cc3; color: white;"
+                "  font-weight: bold; font-size: 11px; border-radius: 4px; padding: 6px 18px; }"
+                "QPushButton:hover { background-color: #1249a3; }"
+                "QPushButton:disabled { background-color: #adb5bd; color: #e9ecef; }"
             )
-            msg.addButton("Cancelar período", QMessageBox.RejectRole)
-            msg.exec_()
- 
-            clicked = msg.clickedButton()
- 
+
+            btn_cancelar2 = QPushButton("Cancelar")
+            btn_cancelar2.setFixedHeight(34)
+            btn_cancelar2.setStyleSheet(
+                "QPushButton { background-color: #6c757d; color: white;"
+                "  font-size: 11px; border-radius: 4px; padding: 6px 14px; }"
+                "QPushButton:hover { background-color: #5a6268; }"
+            )
+
+            # Habilita "Gerar Excel" assim que qualquer radiobutton for selecionado
+            grp_botoes.buttonClicked.connect(lambda _: btn_gerar2.setEnabled(True))
+
+            btn_gerar2.clicked.connect(dlg2.accept)
+            btn_cancelar2.clicked.connect(dlg2.reject)
+
+            btn_row2.addWidget(btn_gerar2)
+            btn_row2.addStretch()
+            btn_row2.addWidget(btn_cancelar2)
+            lay2.addLayout(btn_row2)
+
+            # ── Executa e despacha ────────────────────────────────────────────────
             # Gera o arquivo de busca em qualquer caso (estava marcado)
             self._gerar_excel_medidores(criterio=criterio_atual, termo=valor_busca)
- 
-            if clicked is btn_independente:
-                # Período sem filtro de busca — todos os medidores ativos no período
-                self._gerar_excel_medidores_periodo(data_inicio, data_fim)
-            elif clicked is btn_filtrado:
-                # Período restrito ao critério/termo da busca ativa
-                self._gerar_excel_medidores_periodo(
-                    data_inicio, data_fim,
-                    criterio=criterio_atual, termo=valor_busca
-                )
-            # else: "Cancelar período" — não gera o arquivo de período
- 
-        else:
-            # Apenas um dos dois (ou nenhum) marcado — fluxo simples
-            if chk_busca.isChecked():
-                self._gerar_excel_medidores(criterio=criterio_atual, termo=valor_busca)
- 
-            if chk_periodo.isChecked():
-                self._gerar_excel_medidores_periodo(data_inicio, data_fim)
+
+            if dlg2.exec_() == QDialog.Accepted:
+                if rb_independente.isChecked():
+                    self._gerar_excel_medidores_periodo(data_inicio, data_fim)
+                else:
+                    self._gerar_excel_medidores_periodo(
+                        data_inicio, data_fim,
+                        criterio=criterio_atual, termo=valor_busca
+                    )
+
+        # Busca individual (sem período marcado)
+        if chk_busca.isChecked() and not chk_periodo.isChecked():
+            self._gerar_excel_medidores(criterio=criterio_atual, termo=valor_busca)
+
+        # Período individual (sem busca marcada)
+        if chk_periodo.isChecked() and not chk_busca.isChecked():
+            self._gerar_excel_medidores_periodo(data_inicio, data_fim)                    
  
     def _gerar_excel_medidores(self, criterio=None, termo=None):
         """
@@ -2241,7 +2362,6 @@ class WidgetMedidores(QWidget):
             f"Arquivo exportado com sucesso!\n\n{caminho}",
             QMessageBox.Ok
         )
-
  
     def _gerar_excel_medidores_periodo(self, data_inicio, data_fim=None,
                                        criterio=None, termo=None):
@@ -2273,7 +2393,8 @@ class WidgetMedidores(QWidget):
         CNARH | Interferência(s) | Usuário/Empreendimento | Nome Empreendimento |
         Rótulo do Medidor | UAM | Data Início Atividade | Total Dias c/ Dados |
         Total Dias c/ Dados no Período (apenas quando há intervalo de datas) |
-        Critério de Filtro aplicado (quando há busca)
+        Total Dias s/ Dados no Período | Dias Sequenciais s/ Dados |
+        Última Data c/ Dado
         """
         try:
             from openpyxl import Workbook
@@ -2325,11 +2446,11 @@ class WidgetMedidores(QWidget):
  
         # Filtros fixos de qualidade do dado
         _where_base = """
-            rotulo_intervencao_medidor !~~ '%%999%%'
-            AND rotulo_intervencao_medidor !~~ '%%VERDE GRANDE%%'
-            AND rotulo_intervencao_medidor !~~ '%%#'
-            AND longitude IS NOT NULL
-            AND latitude IS NOT NULL
+            _vuoir.rotulo_intervencao_medidor !~~ '%%999%%'
+            AND _vuoir.rotulo_intervencao_medidor !~~ '%%VERDE GRANDE%%'
+            AND _vuoir.rotulo_intervencao_medidor !~~ '%%#'
+            AND _vuoir.longitude IS NOT NULL
+            AND _vuoir.latitude IS NOT NULL
         """
  
         # Filtro de busca adicional na CTE interferencias_base
@@ -2361,7 +2482,7 @@ class WidgetMedidores(QWidget):
                     JOIN public.ft_uam_buffer _uam
                         ON ST_Intersects(
                             ST_Transform(ST_SetSRID(
-                                ST_MakePoint(longitude, latitude), 4326), 4674),
+                                ST_MakePoint(_vuoir.longitude, _vuoir.latitude), 4326), 4674),
                             _uam.geom
                         )
                 """
@@ -2372,7 +2493,7 @@ class WidgetMedidores(QWidget):
                     JOIN public.ft_sishidrico_buffer _sh
                         ON ST_Intersects(
                             ST_Transform(ST_SetSRID(
-                                ST_MakePoint(longitude, latitude), 4326), 4674),
+                                ST_MakePoint(_vuoir.longitude, _vuoir.latitude), 4326), 4674),
                             _sh.geom
                         )
                 """
@@ -2402,19 +2523,20 @@ class WidgetMedidores(QWidget):
         sql = f"""
         WITH interferencias_base AS (
             SELECT
-                nu_cnarh,
-                nu_interferencia_cnarh,
-                usuario,
-                rotulo_intervencao_medidor,
-                longitude,
-                latitude,
-                intervencao_id
-            FROM public.view_usuario_operador_id_rotulo
+                _vuoir.nu_cnarh,
+                _vuoir.nu_interferencia_cnarh,
+                _vuoir.usuario,
+                _vuoir.rotulo_intervencao_medidor,
+                _vuoir.longitude,
+                _vuoir.latitude,
+                _vuoir.intervencao_id
+            FROM public.view_usuario_operador_id_rotulo _vuoir
             {_join_extra}
             WHERE {_where_base}
               {_where_busca}
         ),
         metricas_telemetria AS (
+            -- Agrega métricas brutas por medidor dentro do período solicitado
             SELECT
                 t.intervencao_id,
                 MIN(t.data) FILTER (WHERE t.consumo_diario > 0) AS data_inicio,
@@ -2425,13 +2547,82 @@ class WidgetMedidores(QWidget):
                     WHERE t.consumo_diario > 0
                       AND t.data >= %(mp_ini)s
                       AND t.data <= %(mp_fim)s
-                ) AS nu_dias_periodo
+                ) AS nu_dias_periodo,
+                -- Última data com dado no período
+                MAX(t.data) FILTER (
+                    WHERE t.consumo_diario > 0
+                      AND t.data >= %(mp_ini)s
+                      AND t.data <= %(mp_fim)s
+                ) AS ultima_data_dado,
+                -- Total de dias sem dado no período (calendário - dias com dado)
+                (
+                    (%(mp_fim)s::date - %(mp_ini)s::date + 1)
+                    - COUNT(DISTINCT t.data) FILTER (
+                        WHERE t.consumo_diario > 0
+                          AND t.data >= %(mp_ini)s
+                          AND t.data <= %(mp_fim)s
+                    )
+                ) AS nu_dias_sem_dados
             FROM public.tb_telemetria_intervencao_diaria t
             WHERE EXISTS (
                 SELECT 1 FROM interferencias_base i
                 WHERE i.intervencao_id = t.intervencao_id
             )
             GROUP BY t.intervencao_id
+        ),
+        -- Sequência máxima de dias consecutivos SEM dado por medidor no período
+        dias_com_dado AS (
+            -- Materializa os dias COM dado de cada medidor no período
+            SELECT DISTINCT
+                t.intervencao_id,
+                t.data::date AS dia
+            FROM public.tb_telemetria_intervencao_diaria t
+            WHERE t.consumo_diario > 0
+              AND t.data >= %(mp_ini)s
+              AND t.data <= %(mp_fim)s
+              AND EXISTS (
+                  SELECT 1 FROM interferencias_base i
+                  WHERE i.intervencao_id = t.intervencao_id
+              )
+        ),
+        calendario_periodo AS (
+            -- Série de todos os dias do período para cada medidor presente
+            SELECT
+                m.intervencao_id,
+                g.dia::date AS dia
+            FROM metricas_telemetria m
+            CROSS JOIN LATERAL generate_series(
+                %(mp_ini)s::date,
+                %(mp_fim)s::date,
+                INTERVAL '1 day'
+            ) AS g(dia)
+        ),
+        dias_sem_dado AS (
+            -- Dias do calendário que NÃO têm leitura com consumo
+            SELECT
+                c.intervencao_id,
+                c.dia,
+                -- Island: date - integer = date; dias consecutivos caem no mesmo grp
+                c.dia - (ROW_NUMBER() OVER (
+                    PARTITION BY c.intervencao_id
+                    ORDER BY c.dia
+                ))::int AS grp
+            FROM calendario_periodo c
+            LEFT JOIN dias_com_dado d
+                ON d.intervencao_id = c.intervencao_id AND d.dia = c.dia
+            WHERE d.dia IS NULL
+        ),
+        seq_max AS (
+            -- Maior sequência consecutiva de dias sem dado por medidor
+            SELECT
+                intervencao_id,
+                MAX(cnt) AS max_dias_seq_sem_dados
+            FROM (
+                SELECT intervencao_id, grp, COUNT(*) AS cnt
+                FROM dias_sem_dado
+                GROUP BY intervencao_id, grp
+            ) sub
+            GROUP BY intervencao_id
         ),
         dados_empreendimento AS (
             SELECT
@@ -2440,6 +2631,9 @@ class WidgetMedidores(QWidget):
                 mt.data_fim,
                 mt.nu_dias,
                 mt.nu_dias_periodo,
+                mt.nu_dias_sem_dados,
+                mt.ultima_data_dado,
+                COALESCE(sq.max_dias_seq_sem_dados, 0) AS max_dias_seq_sem_dados,
                 CASE
                     WHEN b.nome_empreendimento IS NOT NULL THEN b.nome_empreendimento
                     WHEN c.nome_empreendimento IS NOT NULL THEN c.nome_empreendimento
@@ -2455,6 +2649,8 @@ class WidgetMedidores(QWidget):
             FROM interferencias_base i
             LEFT JOIN metricas_telemetria mt
                 ON mt.intervencao_id = i.intervencao_id
+            LEFT JOIN seq_max sq
+                ON sq.intervencao_id = i.intervencao_id
             LEFT JOIN public.tb_mapserver_obrigatoriedade b
                 ON b.codigo_interferencia = i.nu_interferencia_cnarh::integer
             LEFT JOIN public.tb_captacao_obrigatorios c
@@ -2508,31 +2704,34 @@ class WidgetMedidores(QWidget):
             MIN(data_inicio)         AS data_inicio_atividade,
             SUM(nu_dias)             AS total_dias,
             -- Dias com consumo dentro do intervalo solicitado
-            SUM(nu_dias_periodo)     AS total_dias_periodo
+            SUM(nu_dias_periodo)     AS total_dias_periodo,
+            -- Novas métricas de ausência de dado
+            SUM(nu_dias_sem_dados)        AS total_dias_sem_dados,
+            MAX(max_dias_seq_sem_dados)   AS max_seq_dias_sem_dados,
+            MAX(ultima_data_dado)         AS ultima_data_dado
         FROM uam_priorizado
         GROUP BY nu_cnarh, usuario, rotulo_intervencao_medidor
         {_having_periodo}
         ORDER BY rotulo_intervencao_medidor
         """
  
-        # Monta lista de parâmetros: busca (posicionais) + período (nomeados)
-        # psycopg2 aceita mistura apenas se usarmos pyformat (%s / %(x)s).
-        # Estratégia: substituímos os placeholders nomeados do período por %s
-        # e passamos tudo em lista ordenada.
-        params_finais: list = []
-        params_finais.extend(_params_busca)
-        # %(mp_ini)s / %(mp_fim)s — filtro de dias dentro do período (metricas_telemetria)
-        # data_fim ausente (data única) → mp_fim = data_inicio (intervalo de 1 dia)
+        # ── Monta parâmetros como dicionário nomeado (psycopg2 pyformat) ───────────
+        # Todos os placeholders da query usam %(nome)s; os parâmetros de busca
+        # posicionais (%s) são convertidos para %(busca_0)s … %(busca_N)s.
         _mp_fim = data_fim if data_fim else data_inicio
-        sql = sql.replace("%(mp_ini)s", "%s").replace("%(mp_fim)s", "%s")
-        params_finais += [data_inicio, _mp_fim]
-        # %(p_ini)s / %(p_fim)s — filtro de período no HAVING
-        if data_fim:
-            sql = sql.replace("%(p_fim)s", "%s").replace("%(p_ini)s", "%s")
-            params_finais += [data_fim, data_inicio]
-        else:
-            sql = sql.replace("%(p_ini)s", "%s")
-            params_finais += [data_inicio]
+
+        # Converte placeholders posicionais da busca para nomeados
+        params_finais: dict = {}
+        for i, val in enumerate(_params_busca):
+            placeholder_novo = f"%(busca_{i})s"
+            sql = sql.replace("%s", placeholder_novo, 1)
+            params_finais[f"busca_{i}"] = val
+
+        # Parâmetros de período — nomeados, usados N vezes na query sem problema
+        params_finais["mp_ini"] = data_inicio
+        params_finais["mp_fim"] = _mp_fim
+        params_finais["p_ini"]  = data_inicio
+        params_finais["p_fim"]  = data_fim  # None quando data única (HAVING ignora)
  
         # ── Executa ───────────────────────────────────────────────────────────────
         cursor = None
@@ -2649,15 +2848,16 @@ class WidgetMedidores(QWidget):
         # Coluna de dias no período apenas quando há intervalo de datas
         if data_fim:
             colunas.append("Total Dias c/ Dados no Período")
-        # Acrescenta coluna de critério quando há filtro de busca
-        if criterio and termo:
-            colunas.append(f"Filtro: {criterio}")
- 
+        # Novas colunas — sempre presentes
+        colunas += [
+            "Total Dias s/ Dados no Período",
+            "Dias Sequenciais s/ Dados",
+            "Última Data c/ Dado",
+        ]
         larguras = [18, 26, 36, 36, 26, 28, 16, 18]
         if data_fim:
-            larguras.append(22)
-        if criterio and termo:
             larguras.append(26)
+        larguras += [26, 22, 18]
  
         n_cols   = len(colunas)
         col_last = get_column_letter(n_cols)
@@ -2691,16 +2891,24 @@ class WidgetMedidores(QWidget):
         ws.row_dimensions[3].height = 20
  
         # Linhas de dados
+        # SELECT: 0=nu_cnarh 1=cod_interf 2=nome_usu 3=nome_emp 4=rotulo
+        #   5=nome_uam 6=dt_inicio 7=total_dias 8=total_dias_periodo
+        #   9=total_dias_sem_dados 10=max_seq_dias_sem_dados 11=ultima_data_dado
         for idx, row_data in enumerate(linhas, start=4):
             (nu_cnarh, cod_interf, nome_usu, nome_emp,
              rotulo, nome_uam, dt_inicio, total_dias,
-             total_dias_periodo) = row_data[:9]
- 
+             total_dias_periodo, total_dias_sem_dados,
+             max_seq_dias_sem_dados, ultima_data_dado) = row_data[:12]
+
             dt_inicio_str = (
                 dt_inicio.strftime('%d/%m/%Y')
                 if dt_inicio else "—"
             )
- 
+            ultima_data_str = (
+                ultima_data_dado.strftime('%d/%m/%Y')
+                if ultima_data_dado else "—"
+            )
+
             valores = [
                 nu_cnarh    or "—",
                 cod_interf  or "—",
@@ -2715,21 +2923,30 @@ class WidgetMedidores(QWidget):
                 valores.append(
                     total_dias_periodo if total_dias_periodo is not None else "—"
                 )
-            if criterio and termo:
-                valores.append(f"{criterio}: {termo}")
- 
+            # Novas colunas — sempre adicionadas ao final
+            valores += [
+                total_dias_sem_dados   if total_dias_sem_dados   is not None else "—",
+                max_seq_dias_sem_dados if max_seq_dias_sem_dados is not None else "—",
+                ultima_data_str,
+            ]
+
             fill_linha = fill_alt if (idx % 2 == 0) else None
- 
+
+            # Colunas centralizadas: CNARH(1), Início(7), Total Dias c/ Dados(8),
+            # + Período(9 se data_fim), + 3 novas (sempre as 3 últimas)
+            n_val = len(valores)
+            cols_centro = {1, 7, 8, n_val - 2, n_val - 1, n_val}
+            if data_fim:
+                cols_centro.add(9)
+
             for ci, val in enumerate(valores, 1):
                 cell        = ws.cell(row=idx, column=ci, value=val)
                 cell.font   = font_normal
                 cell.border = borda
                 if fill_linha:
                     cell.fill = fill_linha
-                # Centraliza colunas numéricas/data (1=CNARH, 7=Início, 8=Dias)
-                # col 9 = Dias Período (só existe quando há intervalo)
-                cell.alignment = ali_centro if ci in (1, 7, 8, 9) else ali_esq
- 
+                cell.alignment = ali_centro if ci in cols_centro else ali_esq
+
         # Larguras e freeze
         for ci, larg in enumerate(larguras, 1):
             ws.column_dimensions[get_column_letter(ci)].width = larg

@@ -97,11 +97,7 @@ class VerificacaoOutorgadoThread(QThread):
         self.data_fim    = data_fim      # date object — modo por_periodo
         self.thread_conn = None
         self._cancelado  = False
- 
-    # ------------------------------------------------------------------
-    # Cancelamento cooperativo
-    # ------------------------------------------------------------------
- 
+  
     def cancelar(self):
         self._cancelado = True
         print("[THREAD] Cancelamento solicitado pelo usuário")
@@ -111,11 +107,7 @@ class VerificacaoOutorgadoThread(QThread):
                 print("[THREAD] Comando CANCEL enviado ao PostgreSQL")
             except Exception as e:
                 print(f"[THREAD] Erro ao cancelar: {e}")
- 
-    # ------------------------------------------------------------------
-    # Ponto de entrada da thread
-    # ------------------------------------------------------------------
- 
+  
     def run(self):
         import psycopg2
         try:
@@ -148,11 +140,7 @@ class VerificacaoOutorgadoThread(QThread):
                     self.thread_conn.close()
                 except Exception:
                     pass
- 
-    # ------------------------------------------------------------------
-    # Helper estático
-    # ------------------------------------------------------------------
- 
+  
     @staticmethod
     def _meses_no_periodo(data_inicio, data_fim):
         """Retorna lista de (ano, mes, frac_dias) que o período cobre.
@@ -174,11 +162,7 @@ class VerificacaoOutorgadoThread(QThread):
             cur = date(cur.year + 1, 1, 1) if cur.month == 12 \
                   else date(cur.year, cur.month + 1, 1)
         return resultado
- 
-    # ------------------------------------------------------------------
-    # Modo mensal — comportamento original
-    # ------------------------------------------------------------------
- 
+  
     def _run_mensal(self, cursor):
         """Verifica consumo de um único mês versus outorgado mensal."""
  
@@ -193,6 +177,7 @@ class VerificacaoOutorgadoThread(QThread):
             SELECT
                 i.nu_interferencia_cnarh::integer,
                 i.nu_cnarh,
+                sfi.nome_empreendimento,
                 i.usuario,
                 i.operador,
                 STRING_AGG(DISTINCT i.rotulo_intervencao_medidor, ', '
@@ -204,12 +189,14 @@ class VerificacaoOutorgadoThread(QThread):
                 AND EXTRACT(MONTH FROM t.data) = %s
                 AND EXTRACT(YEAR  FROM t.data) = %s
             LEFT JOIN tb_intervencao tb ON tb.id = i.intervencao_id
+            LEFT JOIN public.tb_mv_sfi_cnarh40 sfi
+                ON sfi.codigo_interferencia = i.nu_interferencia_cnarh::integer            
             WHERE i.nu_interferencia_cnarh IS NOT NULL
               AND i.nu_interferencia_cnarh <> 'TESTE'
               AND i.rotulo_intervencao_medidor !~~ '%%999%%'
               AND i.rotulo_intervencao_medidor !~~ '%%VERDE GRANDE%%'
               AND i.rotulo_intervencao_medidor !~~ '%%#'
-            GROUP BY i.nu_interferencia_cnarh, i.nu_cnarh, i.usuario, i.operador
+            GROUP BY i.nu_interferencia_cnarh, i.nu_cnarh, i.usuario, i.operador, sfi.nome_empreendimento
             HAVING COALESCE(SUM(t.consumo_diario), 0) > 0;
         """
         cursor.execute(query_consumo, (self.mes, self.ano))
@@ -259,12 +246,14 @@ class VerificacaoOutorgadoThread(QThread):
         self.resultado_signal.emit(resultados_finais, self.nome_mes, self.ano)
         print(f"[THREAD] Mensal concluído: {len(resultados_finais)} alertas")
  
-    # ------------------------------------------------------------------
-    # Modo por período — novo
-    # ------------------------------------------------------------------
- 
     def _run_por_periodo(self, cursor):
-        """Verifica consumo de um intervalo de datas versus outorgado pro-rata."""
+        """Verifica consumo de um intervalo de datas versus outorgado mensal cheio.
+
+        Cada chamada cobre exatamente um mês (a expansão por mês é feita em
+        JanelaMonitoramento._iniciar_verificacao_selecionados). O outorgado
+        utilizado é o volume mensal integral da view_volume_outorgado, sem
+        ponderação pro-rata.
+        """
  
         # ── ETAPA 1: Consumo no intervalo ─────────────────────────────────
         self.progresso_signal.emit(
@@ -279,22 +268,25 @@ class VerificacaoOutorgadoThread(QThread):
             SELECT
                 i.nu_interferencia_cnarh::integer,
                 i.nu_cnarh,
+                sfi.nome_empreendimento,
                 i.usuario,
                 i.operador,
                 STRING_AGG(DISTINCT i.rotulo_intervencao_medidor, ', '
                     ORDER BY i.rotulo_intervencao_medidor) AS rotulos_medidores,
-                COALESCE(SUM(t.consumo_diario), 0) AS consumo_periodo
+                COALESCE(SUM(t.consumo_diario), 0) AS consumo_mes
             FROM view_usuario_operador_id_rotulo i
             LEFT JOIN tb_telemetria_intervencao_diaria t
                 ON i.intervencao_id = t.intervencao_id
                 AND t.data BETWEEN %s AND %s
             LEFT JOIN tb_intervencao tb ON tb.id = i.intervencao_id
+            LEFT JOIN public.tb_mv_sfi_cnarh40 sfi
+                ON sfi.codigo_interferencia = i.nu_interferencia_cnarh::integer            
             WHERE i.nu_interferencia_cnarh IS NOT NULL
               AND i.nu_interferencia_cnarh <> 'TESTE'
               AND i.rotulo_intervencao_medidor !~~ '%%999%%'
               AND i.rotulo_intervencao_medidor !~~ '%%VERDE GRANDE%%'
               AND i.rotulo_intervencao_medidor !~~ '%%#'
-            GROUP BY i.nu_interferencia_cnarh, i.nu_cnarh, i.usuario, i.operador
+            GROUP BY i.nu_interferencia_cnarh, i.nu_cnarh, i.usuario, i.operador, sfi.nome_empreendimento
             HAVING COALESCE(SUM(t.consumo_diario), 0) > 0;
         """
         cursor.execute(query_consumo, (self.data_inicio, self.data_fim))
@@ -303,39 +295,27 @@ class VerificacaoOutorgadoThread(QThread):
         if self._cancelado:
             cursor.close(); return
  
-        # ── ETAPA 2: Outorgado pro-rata (ponderado por fração de dias) ────
-        self.progresso_signal.emit("Buscando volumes outorgados pro-rata...")
- 
-        meses_frac = self._meses_no_periodo(self.data_inicio, self.data_fim)
- 
+        # ── ETAPA 2: Outorgado mensal cheio (sem pro-rata) ────────────────
+        # data_inicio e data_fim pertencem ao mesmo mês (a expansão por mês
+        # é feita em JanelaMonitoramento._iniciar_verificacao_selecionados).
+        self.progresso_signal.emit("Buscando volume outorgado mensal...")
+
         col_map = {
             1: 'vol_jan', 2: 'vol_fev', 3: 'vol_mar', 4: 'vol_abr',
             5: 'vol_mai', 6: 'vol_jun', 7: 'vol_jul', 8: 'vol_ago',
             9: 'vol_set', 10: 'vol_out', 11: 'vol_nov', 12: 'vol_dez',
         }
-        # {cod_interf: {mes: vol_mensal}}
-        outorgado_mensal: dict = {}
-        meses_distintos = list({(a, m) for a, m, _ in meses_frac})
- 
-        for (ano_m, mes_m) in meses_distintos:
-            col = col_map[mes_m]
-            cursor.execute(f"""
-                SELECT codigo_interferencia, {col}
-                FROM view_volume_outorgado
-                WHERE {col} > 0
-            """)
-            for row in cursor.fetchall():
-                cod = row[0]
-                vol = float(row[1]) if row[1] else 0.0
-                outorgado_mensal.setdefault(cod, {})[mes_m] = vol
- 
-        # Soma ponderada por fração de dias em cada mês
-        outorgado_map: dict = {}
-        for cod, meses_vol in outorgado_mensal.items():
-            outorgado_map[cod] = sum(
-                meses_vol.get(mes_m, 0.0) * frac
-                for (_, mes_m, frac) in meses_frac
-            )
+        mes_ref = self.data_inicio.month
+        col     = col_map[mes_ref]
+        cursor.execute(f"""
+            SELECT codigo_interferencia, {col}
+            FROM view_volume_outorgado
+            WHERE {col} > 0
+        """)
+        outorgado_map = {
+            row[0]: float(row[1])
+            for row in cursor.fetchall() if row[1]
+        }
  
         if self._cancelado:
             cursor.close(); return
@@ -351,41 +331,48 @@ class VerificacaoOutorgadoThread(QThread):
         # ano=0 sinaliza modo por_periodo ao receptor do signal
         self.resultado_signal.emit(resultados_finais, self.nome_mes, 0)
         print(f"[THREAD] Por período concluído: {len(resultados_finais)} alertas")
- 
-    # ------------------------------------------------------------------
-    # Combinação / filtragem — comum a ambos os modos
-    # ------------------------------------------------------------------
- 
+  
     def _combinar_e_filtrar(self, consumo_resultados, outorgado_map):
-        """Cruza consumo com outorgado, filtra consumo > outorgado (100%)
-        e calcula o percentual de excesso.
- 
+        """Cruza consumo com outorgado e calcula percentual de uso.
+
+        Retorna TODOS os registros com consumo > 0:
+          - consumo > outorgado  → percentual positivo  (alerta)
+          - consumo <= outorgado → percentual negativo ou zero (dentro do limite)
+
+        O campo índice 9 (eh_alerta: bool) permite que o receptor
+        distinga alertas reais de registros informativos.
+
         Returns:
-            list[tuple]: Cada tupla tem 8 elementos:
-                (cod_interf, cnarh, usuario, operador, rotulos,
-                 consumo, outorgado, percentual_excesso)
-                ordenados do maior para o menor percentual.
+            list[tuple]: Cada tupla tem 10 elementos:
+                (cod_interf, cnarh, empreendimento, usuario, operador,
+                 rotulos, consumo, outorgado, percentual, eh_alerta)
+                Alertas primeiro (desc. por percentual), depois informativos.
         """
-        resultados_finais = []
+        alertas    = []
+        informativos = []
+
         for row in consumo_resultados:
             cod_interf    = row[0]
-            consumo_bruto = float(row[5]) if row[5] else 0.0
+            consumo_bruto = float(row[6]) if row[6] else 0.0
             outorgado     = outorgado_map.get(cod_interf, 0.0)
- 
-            # Limiar: 100 % — qualquer consumo acima do outorgado gera alerta
-            if outorgado > 0 and consumo_bruto > outorgado:
+
+            if outorgado > 0:
                 percentual = round((consumo_bruto / outorgado - 1.0) * 100.0, 1)
-                resultados_finais.append((
-                    row[0],         # cod_interf
-                    row[1],         # cnarh
-                    row[2],         # usuario
-                    row[3],         # operador
-                    row[4],         # rotulos_medidores
-                    consumo_bruto,  # consumo (m³)
-                    outorgado,      # outorgado (m³)
-                    percentual,     # % excesso acima do outorgado  ← NOVO
-                ))
- 
-        # Ordena do maior para o menor percentual de excesso
-        resultados_finais.sort(key=lambda x: x[7], reverse=True)
-        return resultados_finais
+            else:
+                percentual = 0.0
+
+            eh_alerta = outorgado > 0 and consumo_bruto > outorgado
+
+            registro = (
+                row[0], row[1], row[2], row[3], row[4], row[5],
+                consumo_bruto, outorgado, percentual, eh_alerta,
+            )
+
+            if eh_alerta:
+                alertas.append(registro)
+            else:
+                informativos.append(registro)
+
+        alertas.sort(key=lambda x: x[8], reverse=True)
+        informativos.sort(key=lambda x: x[8], reverse=True)
+        return alertas + informativos

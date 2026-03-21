@@ -370,26 +370,68 @@ Painel executivo com KPIs em três camadas visuais, alimentadas por queries SQL 
 
 #### `widget_operadores.py` → `WidgetOperadores(QWidget)`
 
-Aba de consulta e edição de operadores em `tb_operador_telemetria`. Funcionalidades:
+Aba de consulta e edição de operadores em `tb_operador_telemetria`. Suporta dois perfis de acesso: usuários `telemetria_ro` visualizam os dados mas têm campos somente leitura e botões de escrita ocultos; demais usuários têm acesso completo. O botão "Ver Medidores Vinculados" navega diretamente para a aba de medidores filtrando pelo ID do operador selecionado, sem exigir nova digitação.
 
-- Busca por nome via `QComboBox` editável com carregamento da lista completa;
-- Edição dos campos Nome, CPF/CNPJ e E-mail com `UPDATE` direto ao clicar em "Salvar alterações";
-- Exclusão com confirmação via `QMessageBox` (`DELETE`);
-- Navegação para a aba de medidores via referência ao `parent_window` (`JanelaGestaoDados`);
-- Exportação XLSX com dois modos: todos os operadores ou somente os com transmissão ativa.
+**Métodos públicos:**
+
+| Método | Descrição |
+|---|---|
+| `initUI()` | Constrói o layout: `QComboBox` editável de busca, grid de campos (ID, Nome, CPF/CNPJ, E-mail, Data), botões de ação. Aplica restrições de perfil `telemetria_ro` ao final. |
+| `carregar_lista_operadores()` | Executa `SELECT id, nome, email FROM tb_operador_telemetria ORDER BY nome` e popula o `combo_operadores`; chamada na inicialização e após cada salvar/apagar. |
+| `carregar_dados_operador(index)` | Slot de `currentIndexChanged`: carrega `id, nome, numero_cadastro, email, data` do operador selecionado e habilita `btn_apagar` e `btn_ver_medidores`. |
+| `habilitar_salvar()` | Compara os valores atuais dos campos com `operador_atual`; habilita `btn_salvar` somente se houver diferença e o perfil não for `telemetria_ro`. |
+| `salvar_alteracoes()` | Valida e-mail com regex RFC-like, monta mensagem diff de campos alterados, executa `UPDATE tb_operador_telemetria SET nome, email, numero_cadastro WHERE id` com `commit()`; recarrega o combo ao final. |
+| `apagar_operador()` | Verifica vínculos ativos em `tb_intervencao` (excluindo rótulos `999%`); se existirem, exibe lista e bloqueia a exclusão. Caso contrário: executa `UPDATE tb_intervencao SET operador_telemetria = NULL, rotulo = rotulo || '#'` seguido de `DELETE FROM tb_operador_telemetria WHERE id`. |
+| `limpar_campos()` | Zera todos os campos, reseta `operador_atual = None` e oculta `btn_ver_medidores`. |
+| `ir_para_medidores_vinculados()` | Chama `widget_medidores.buscar_medidores_por_operador_id(id_operador)` via `parent_window` e comuta o `QTabWidget` para o índice 1 (aba de medidores). |
+| `exportar_operadores_excel()` | Exibe diálogo com dois checkboxes independentes ("Todos cadastrados" / "Com transmissão ativa"); para cada opção marcada chama `_gerar_excel_operadores()`. |
+| `_gerar_excel_operadores(somente_ativos)` | Gera XLSX com padrão institucional (cabeçalho azul `#175cc3`, linhas alternadas `#eaf2ff`, bordas finas, freeze em A4). `somente_ativos=True` restringe a operadores com `consumo_diario > 0` em medidores válidos (sem rótulo `999`, sem `VERDE GRANDE`, com coordenadas). Aplica workaround de mascaramento de `lxml` antes de instanciar `Workbook()`. |
 
 **Importações relevantes:**
 ```python
 from . import ui_tema
 ```
 
+---
+
 #### `widget_medidores.py` → `WidgetMedidores(QWidget)`
 
 Aba de consulta, edição e manutenção de medidores em `tb_intervencao`. Suporta busca por 6 critérios:
 
-`Rótulo` · `Nome do usuário` · `CNARH` · `Código UC` · `Operador` · `Sistema Hídrico`
+`Rótulo` · `Usuário` · `CNARH` · `Operador` · `UAM` · `Sistema Hídrico`
 
-Ao selecionar um medidor na `QTreeWidget`, os campos de detalhe são preenchidos. Ao editar vazão ou potência e o campo perder foco (`editingFinished`), os diálogos de unidade são disparados automaticamente. Campos inválidos são destacados em vermelho. Desativação lógica via sufixo `#` no rótulo. Reativação via `DialogReativacao`. Exportação XLSX com mesma formatação institucional.
+Os critérios `Sistema Hídrico` e `UAM` executam junções espaciais via `ST_Intersects` com `ft_sishidrico_buffer` e `ft_uam_buffer` respectivamente, exigindo cursor de espera (`Qt.WaitCursor`). Os demais critérios consultam `view_ft_intervencao` via ILIKE. Resultados são exibidos em `QListWidget` com contagem de medidores e interferências distintas. A exportação XLSX suporta três escopos combináveis: todos, por critério de busca ativo e por período de atividade.
+
+**Métodos públicos:**
+
+| Método | Descrição |
+|---|---|
+| `initUI()` | Constrói o layout completo: área de busca (combo de critério + input + autocomplete), `QListWidget` de resultados com contagem, grid de campos de detalhe (Rótulo readonly, Código UC, Vazão, Potência, Equipamento, Transmissão, Operador), seção de informações de referência (Interferência, Usuário, CNARH) e barra de botões. |
+| `atualizar_placeholder()` | Atualiza o `placeholderText` do `input_busca` conforme o critério selecionado no `combo_criterio`. |
+| `buscar_medidores_autocomplete(texto)` | Slot de `textChanged`: para textos ≥ 2 caracteres executa SELECT DISTINCT com ILIKE nos campos da view ou tabelas de buffer e popula `combo_sugestoes`; oculta o combo em caso de ausência de resultados. |
+| `buscar_medidores()` | Busca completa disparada pelo botão "Buscar" ou `returnPressed`. Roteia para query espacial (`ST_Intersects`) nos critérios `Sistema Hídrico` / `UAM`, ou para JOIN direto em `tb_intervencao` no critério `Rótulo`, ou para `view_ft_intervencao` nos demais. Preenche `lista_resultados` com rótulo, usuário e operador; exibe contagem de medidores e interferências distintas em `lbl_contagem`. |
+| `selecionar_sugestao(index)` | Slot de `activated` do `combo_sugestoes`: copia o item selecionado para `input_busca` e invoca `buscar_medidores()`. |
+| `buscar_medidores_por_operador_id(id_operador)` | Busca medidores exclusivamente por ID de operador (chamado por `WidgetOperadores.ir_para_medidores_vinculados()`); usa JOIN direto em `tb_intervencao × tb_operador_telemetria`, sem passar pela view. |
+| `gerenciar_selecao_lista()` | Slot de `itemSelectionChanged`: se exatamente um item está selecionado chama `carregar_dados_medidor(item)` e habilita `btn_desativar`; caso contrário limpa formulário. Habilita `btn_reativar` quando a seleção inclui pelo menos um rótulo com `#`. |
+| `carregar_dados_medidor(item)` | Carrega todos os campos do medidor selecionado via JOIN entre `tb_intervencao`, `tb_intervencao_interferencia`, `tb_interferencia`, `tb_tipo_medidor`, `tb_modo_transmissao`, `tb_operador_telemetria` e `tb_codigo_uc_intervencao`; preenche o formulário e reseta flags de conversão. |
+| `limpar_campos_formulario()` | Zera todos os campos de detalhe sem apagar a lista de resultados; reseta `medidor_atual = None` e flags de conversão. |
+| `limpar_campos()` | Versão completa: também limpa `lista_resultados` e `input_busca`. |
+| `processar_vazao()` | Slot de `editingFinished` do `input_vazao`: detecta mudança de valor, instancia `DialogoUnidadeVazao` com o valor digitado, converte de m³/h → m³/s (÷ 3600) se confirmado, aplica arredondamento (2 casas se ≥ 0,1; 3 casas se menor) e exibe mensagem informativa de conversão. Guard flag `_processing_vazao` previne reentrância. |
+| `processar_potencia()` | Slot de `editingFinished` do `input_potencia`: fluxo análogo ao da vazão, com `DialogoUnidadePotencia`; converte de cv → kW (× 0,7355) e arredonda para inteiro. Guard flag `_processing_potencia`. |
+| `salvar_alteracoes()` | Valida campos obrigatórios (vazão, potência, equipamento, transmissão, operador); monta mensagem diff comparando `medidor_atual` com os novos valores; executa `UPDATE tb_intervencao` + UPSERT em `tb_codigo_uc_intervencao` + UPDATE de `tb_interferencia.codigo_uc` concatenando todos os UC distintos da mesma interferência; faz `commit()` e atualiza `medidor_atual` em memória sem nova query. |
+| `abrir_dialogo_reativacao()` | Filtra itens selecionados que contenham `#` no rótulo; exibe aviso se parte da seleção não estiver desativada; abre diálogo inline com `QListWidget` de operadores para vinculação; executa `UPDATE tb_intervencao SET rotulo = TRIM(TRAILING '#' FROM rotulo), operador_telemetria = %s` em transação atômica com `rollback()` em caso de erro. |
+| `exportar_medidores_excel()` | Ponto de entrada da exportação: exibe diálogo com três checkboxes independentes — "Todos cadastrados", "Do método de busca" (pré-marcado se busca ativa) e "Por período de atividade" (com `QDateEdit` de início/fim e checkbox "até" para intervalo). Quando busca e período estão simultaneamente marcados, um segundo diálogo com `QRadioButton` pergunta se o arquivo de período deve ser independente ou vinculado ao critério de busca. Cada opção marcada gera um arquivo XLSX distinto. |
+| `_gerar_excel_medidores(criterio, termo)` | Gera XLSX com padrão institucional azul `#175cc3`. `criterio=None` → todos os medidores; caso contrário replica a lógica SQL de `buscar_medidores()` (JOIN espacial para `UAM`/`Sistema Hídrico`, JOIN direto para `Rótulo`, view para demais). Colunas: N° interferência CNARH, N° cadastro CNARH, Usuário, Operador, Rótulo, Vazão nominal, Potência, Tipo, Transmissão. Aplica workaround de mascaramento de `lxml`. |
+| `_gerar_excel_medidores_periodo(data_inicio, data_fim, criterio, termo)` | Gera XLSX roxo `#6f4e8a` (cor distinta para identificação visual do relatório de período). Query multi-CTE: agrega `consumo_diario > 0` por medidor, contabiliza total de dias com dados e, quando `data_fim` é informada, também os dias dentro do intervalo. Colunas extras opcionais: "Total Dias c/ Dados no Período". Adiciona `criterio`/`termo` ao nome do arquivo e ao título da planilha quando informados. |
+
+**Flags de controle de conversão (instância):**
+
+| Atributo | Tipo | Função |
+|---|---|---|
+| `vazao_ja_convertida` | `bool` | Indica conversão já aplicada nesta sessão de edição (prevenção de dupla conversão) |
+| `potencia_ja_convertida` | `bool` | Análogo para potência |
+| `ultimo_valor_vazao` | `str \| None` | Último valor confirmado; compara antes de reabrir o diálogo |
+| `ultimo_valor_potencia` | `str \| None` | Análogo para potência |
 
 **Importações relevantes:**
 ```python
@@ -405,13 +447,54 @@ from .dialogo_reativacao       import DialogReativacao
 
 #### `janela_monitoramento.py` → `JanelaMonitoramento(QWidget)`
 
-Janela de busca e seleção de medidores para o fluxo de monitoramento. Funcionalidades:
+Janela de busca e seleção de medidores para o fluxo de monitoramento. Tamanho fixo 730×600 px, centralizada na tela. Ao instanciar, dispara `_perguntar_verificacao_consumo()` via `QTimer.singleShot(300 ms)` para a verificação assíncrona de excedência. Propaga `conn`, `usuario_logado` e `senha` a todas as janelas filhas.
 
-- Busca com autocompletar em tempo real por 3 critérios (CNARH, Usuário, Sistema Hídrico);
-- Listagem em `QTreeWidget` com seleção múltipla e detecção automática de múltiplas interferências;
-- Verificação assíncrona de consumo vs. outorgado disparada 300 ms após abertura (`QTimer`), via `VerificacaoOutorgadoThread`;
-- Minimiza a janela ao navegar para filhas ("Ver no Mapa") e restaura ao retornar;
-- Atalho "Selecionar tudo" com flag `is_selecao_total` propagada às janelas filhas.
+**Critérios de busca disponíveis:** `CNARH` · `Usuário` · `UAM` · `Sistema Hídrico`
+
+**Métodos públicos:**
+
+| Método | Descrição |
+|---|---|
+| `initUI()` | Constrói o layout: container de busca (combo de critério, `input_busca`, `combo_sugestoes`, botão "Buscar/Limpar"), `QListWidget` de resultados com seleção múltipla (`ExtendedSelection`), botões "Selecionar tudo", "Telemetria" e "Estatísticas", botão "Voltar para Menu". |
+| `atualizar_placeholder_busca()` | Atualiza o `placeholderText` do `input_busca` conforme o critério selecionado. |
+| `buscar_medidores_autocomplete(texto)` | Slot de `textChanged`: para textos ≥ 2 caracteres consulta `view_ft_intervencao`, `ft_uam_buffer` ou `ft_sishidrico_buffer` e popula `combo_sugestoes`. |
+| `buscar_ou_limpar()` | Alterna entre "Buscar" (chama `buscar_medidores()`) e "Limpar" (chama `limpar_busca()`) conforme o texto no botão. |
+| `buscar_medidores()` | Executa a busca completa para o critério/termo atuais; popula `lista_resultados` com rótulo, interferência e sistema hídrico de cada medidor; habilita "Selecionar tudo". |
+| `selecionar_sugestao_busca(index)` | Copia a sugestão para `input_busca` e aciona `buscar_medidores()`. |
+| `selecionar_medidor_da_lista(item)` | Slot de `itemClicked`: identifica medidores de múltiplas interferências na seleção, monta `lista_ids_selecionados` e `lista_dados_selecionados`; habilita botões de ação. |
+| `selecionar_todos_medidores()` | Seleciona todos os itens da `lista_resultados`, define `is_selecao_total = True` e habilita botões de ação. |
+| `limpar_selecao()` | Desmarca itens, zera listas de seleção, desabilita botões de ação e reseta `is_selecao_total`. |
+| `limpar_busca()` | Limpa `input_busca`, `combo_sugestoes`, `lista_resultados` e chama `limpar_selecao()`. |
+| `abrir_monitoramento_detalhes()` | Valida seleção (mínimo 1 medidor); para múltiplas interferências, chama `_verificar_selecao_completa_interferencias()` e bloqueia se alguma estiver incompleta; instancia e exibe `JanelaGraficosMedidor` no modo adequado (simples ou agregado). |
+| `abrir_janela_detalhes()` | Instancia e exibe `JanelaMonitoramentoDetalhes` repassando contexto de busca, flags de seleção total e múltipla interferência; usa `QApplication.setOverrideCursor(Qt.WaitCursor)` durante a abertura. |
+| `center()` | Centraliza a janela na tela via `QDesktopWidget`. |
+| `closeEvent(event)` | Fecha todas as janelas em `_janelas_abertas` antes de aceitar o evento de fechamento (padrão cascade). |
+| `voltar()` | Fecha esta janela e exibe a `TelaInicial`. |
+
+**Métodos privados do subsistema de verificação de outorgado:**
+
+| Método | Descrição |
+|---|---|
+| `_perguntar_verificacao_consumo()` | Diálogo de seleção de período com dois modos via `QRadioButton`: **6 últimos meses** (checkboxes individuais para cada mês) ou **Por período** (dois `QDateEdit` com popup de calendário e validação de intervalo máximo de 12 meses). Define `self.meses_para_verificar` e `self._modo_verificacao`; ao confirmar chama `_confirmar_tempo_processamento_selecao()`. |
+| `_rotulo_periodo(item)` | Método estático: formata o rótulo do período sem duplicar o ano no modo `por_periodo`. |
+| `_confirmar_tempo_processamento_selecao()` | Segunda confirmação: lista os períodos selecionados em HTML e pede confirmação antes de iniciar a verificação. |
+| `_iniciar_verificacao_selecionados()` | Monta `fila_processamento` a partir de `meses_para_verificar`, abre o diálogo de progresso com `QProgressBar` (somente quando há mais de 1 período), e chama `_processar_proximo_da_fila()`. |
+| `_processar_proximo_da_fila()` | Retira o próximo item da fila, instancia `VerificacaoOutorgadoThread` com modo e datas corretos, conecta sinais e chama `start()`; ao concluir a thread (`finished`), invoca-se novamente via sinal. |
+| `_atualizar_mensagem_progresso(item_atual, status)` | Atualiza o `lbl_mes_atual_processando` (azul durante, verde ao concluir) e o `lbl_mensagem` da fila com estado por item; avança `progress_bar` quando `status == 'concluido'`. |
+| `_on_item_fila_concluido(resultados, nome_mes, ano, tipo)` | Armazena resultados em `resultados_processamento[tipo]` e atualiza o indicador de progresso. |
+| `_finalizar_processamento_fila()` | Encerra o diálogo de progresso, restaura cursor, e chama `_exibir_resultados_consolidados()` se houver pelo menos um mês com alertas. |
+| `_on_verificacao_cancelada()` | Seta `_cancelado = True`, chama `cancelar()` na thread ativa e fecha o diálogo de progresso. |
+| `_on_verificacao_erro(mensagem)` | Encerra a fila, restaura cursor e exibe `QMessageBox.critical` com o traceback recebido da thread. |
+| `_on_progresso_atualizado(mensagem)` | Slot de `progresso_signal`: exibe etapa atual no terminal (`print`). |
+| `_exibir_resultados_consolidados()` | Ordena os meses processados cronologicamente, filtra os que têm alertas, e chama `_mostrar_dialogo_alerta_meses(lista_meses)`. |
+| `_mostrar_dialogo_alerta_meses(lista_meses)` | Exibe diálogo não-modal (1100×600) com `QTabWidget` — uma aba por período com alertas. Cada aba é criada por `_criar_aba_mes()`. Botões "Exportar para Excel" e "Fechar"; oculta a barra de abas quando há apenas um período. |
+| `_criar_aba_mes(dados, nome_mes, ano, identificador_aba)` | Cria `QTableWidget` de 9 colunas (INT_CD, CNARH, Empreendimento, Usuário, Operador, Medidor(es), Consumo m³, Outorgado m³, % Acrescido) para o período. Conecta clique em cabeçalho para ordenação e duplo clique em linha para abrir gráficos da interferência. |
+| `_preencher_tabela_aba(identificador_aba)` | Popula as linhas da tabela a partir de `dados_abas[identificador_aba]['atual']`; células com % > 100 recebem cor de fundo vermelho `#dc3545`. |
+| `_ordenar_tabela_aba(coluna, identificador_aba)` | Ordena os dados da aba pelo campo clicado, alternando asc/desc; atualiza `ordem_abas` e repopula via `_preencher_tabela_aba()`. |
+| `_on_interferencia_clicada_aba(item, id_aba, nome_mes, ano)` | Slot de duplo clique na tabela de alertas: lê o `cod_interf` da linha, busca todos os medidores da interferência e abre `JanelaGraficosMedidor` em modo simples (sem agregação). |
+| `_verificar_selecao_completa_interferencias(codigos_interf)` | Para cada código de interferência na seleção, verifica se todos os medidores ativos da interferência estão incluídos; retorna o código da primeira interferência incompleta ou `None`. |
+| `_limpar_referencias_alerta_abas()` | Limpa os dicionários `tabelas_abas`, `dados_abas` e `ordem_abas` ao fechar o diálogo de alerta. |
+| `exportar_alerta_excel_meses(lista_meses)` | Exporta o relatório de excedência para XLSX — uma aba por período, com cabeçalho amarelo de alerta e linhas coloridas por severidade. |
 
 **Importações relevantes:**
 ```python
@@ -420,6 +503,8 @@ from .verificacao_outorgado_thread  import VerificacaoOutorgadoThread
 from .janela_graficos_medidor       import JanelaGraficosMedidor
 from .janela_monitoramento_detalhes import JanelaMonitoramentoDetalhes
 ```
+
+---
 
 #### `janela_graficos_medidor.py` → `JanelaGraficosMedidor(QWidget)`
 
@@ -457,19 +542,45 @@ from .calc_mes_thread import CalcMesThread
 
 #### `verificacao_outorgado_thread.py` → `VerificacaoOutorgadoThread(QThread)`
 
-Thread assíncrona de verificação de excedência de consumo mensal. Abre conexão PostgreSQL dedicada (a partir dos parâmetros DSN da conexão principal). Três etapas sequenciais:
+Thread assíncrona de verificação de excedência de consumo versus volume outorgado. Abre conexão PostgreSQL dedicada a partir dos parâmetros DSN da conexão principal (não reutiliza a conexão da sessão). Suporta dois modos de operação, selecionáveis via parâmetro `modo` no construtor:
 
-1. Agrega `consumo_diario` por interferência para o mês/ano solicitado, excluindo registros de teste;
-2. Busca volumes outorgados mensais de `view_volume_outorgado` via CASE por coluna de mês;
-3. Compara e retorna interferências com `consumo > outorgado`, ordenadas pelo maior excesso absoluto.
+**Modo `'mensal'`** (padrão): analisa um único mês/ano. O outorgado é o volume mensal da `view_volume_outorgado` para o mês especificado, via `CASE` por coluna de mês.
 
-Suporta cancelamento cooperativo via `cancelar()` com envio de `conn.cancel()` ao PostgreSQL.
+**Modo `'por_periodo'`**: analisa um intervalo `[data_inicio, data_fim]`. O outorgado é calculado pro-rata: para cada mês parcialmente coberto pelo intervalo, o volume mensal outorgado é multiplicado pela fração `dias_efetivos / total_dias_mês`. A soma dessas parcelas representa o outorgado proporcional ao intervalo.
+
+Em ambos os modos o limiar de alerta é `consumo > outorgado` e o resultado inclui o percentual de excesso `(consumo / outorgado − 1) × 100`.
+
+**Sinais:**
 
 | Signal | Tipo | Descrição |
 |---|---|---|
-| `resultado_signal` | `(list, str, int)` | Lista de alertas, nome do mês, ano |
-| `erro_signal` | `(str)` | Mensagem de exceção com traceback |
-| `progresso_signal` | `(str)` | Mensagem descritiva da etapa em andamento |
+| `resultado_signal` | `(list, str, int)` | Lista de alertas, rótulo do período, ano (`0` no modo `por_periodo`) |
+| `erro_signal` | `(str)` | Mensagem de exceção com traceback completo |
+| `progresso_signal` | `(str)` | Descrição textual da etapa em andamento |
+
+**Métodos:**
+
+| Método | Descrição |
+|---|---|
+| `cancelar()` | Seta `_cancelado = True` e envia `thread_conn.cancel()` ao PostgreSQL para interromper a query em curso (cancelamento cooperativo). |
+| `run()` | Ponto de entrada da thread: abre conexão dedicada via DSN + senha, delega para `_run_mensal()` ou `_run_por_periodo()` conforme `self.modo`. Garante fechamento da conexão no `finally`. |
+| `_run_mensal(cursor)` | Executa as 3 etapas em modo mensal: (1) agrega `consumo_diario` por interferência via JOIN entre `view_usuario_operador_id_rotulo`, `tb_telemetria_intervencao_diaria` e `tb_mv_sfi_cnarh40`, excluindo rótulos com `999`, `VERDE GRANDE` e `#`; (2) busca volumes outorgados de `view_volume_outorgado` via `CASE` de mês; (3) chama `_combinar_e_filtrar()` e emite `resultado_signal`. |
+| `_run_por_periodo(cursor)` | Executa as 3 etapas em modo por_periodo: (1) mesma query de consumo com filtro `t.data BETWEEN data_inicio AND data_fim`; (2) para cada mês distinto do intervalo executa SELECT na coluna correspondente de `view_volume_outorgado` e acumula em `outorgado_mensal`; (3) calcula `outorgado_map` ponderando por `frac_dias` via `_meses_no_periodo()`; (4) chama `_combinar_e_filtrar()` e emite `resultado_signal` com `ano=0`. |
+| `_meses_no_periodo(data_inicio, data_fim)` *(static)* | Retorna lista de `(ano, mes, frac_dias)` para cada mês coberto pelo intervalo; `frac_dias = dias_efetivos / total_dias_mês`. Utilizado para o cálculo pro-rata do outorgado. |
+| `_combinar_e_filtrar(consumo_resultados, outorgado_map)` | Cruza as listas de consumo e outorgado, filtra `consumo > outorgado`, calcula `percentual_excesso` e retorna lista de tuplas `(cod_interf, cnarh, empreendimento, usuario, operador, rotulos, consumo, outorgado, percentual_excesso)` ordenada do maior para o menor percentual. |
+
+**Atributos de instância relevantes:**
+
+| Atributo | Tipo | Descrição |
+|---|---|---|
+| `conn` | `psycopg2.connection` | Conexão principal; usada apenas para extrair DSN via `get_dsn_parameters()` |
+| `mes` / `ano` | `int` | Mês e ano de referência — usados somente no modo `'mensal'` |
+| `nome_mes` | `str` | Rótulo do período repassado ao `resultado_signal` |
+| `senha` | `str` | Credencial para abertura da conexão dedicada da thread |
+| `modo` | `str` | `'mensal'` (padrão) ou `'por_periodo'` |
+| `data_inicio` / `data_fim` | `date \| None` | Intervalo de datas — obrigatório no modo `por_periodo` |
+| `thread_conn` | `psycopg2.connection \| None` | Conexão exclusiva aberta em `run()`; referenciada por `cancelar()` |
+| `_cancelado` | `bool` | Flag de cancelamento cooperativo; verificado entre as etapas |
 
 #### `calc_mes_thread.py` → `CalcMesThread(QThread)`
 
@@ -608,10 +719,10 @@ Ciclo de operação:
 | Role | Permissões nas tabelas ETL | Acesso à UI |
 |---|---|---|
 | `telemetria_ro` | SELECT | Sem aba ETL, sem cadastro |
-| `telemetria_rw` | SELECT, INSERT, UPDATE, DELETE, TRUNCATE | Acesso completo |
-| `usr_telemetria` | SELECT nas tabelas de referência | — |
-| `iusr_coged_ro` | ALL nas tabelas atualizadas pelo ETL | — |
+| `telemetria_rw` | SELECT, INSERT, UPDATE, DELETE ¹ | Acesso completo |
 | `postgres` | ALL (superusuário) | — |
+
+> **¹ Nota DDL — `telemetria_rw` não é owner das tabelas ETL no RDS:** o ETLWorker tenta `TRUNCATE … RESTART IDENTITY` como operação preferencial; se a exceção `psycopg2.errors.InsufficientPrivilege` for capturada, recorre a `DELETE FROM` como fallback. Por isso, nunca use `TRUNCATE` diretamente em scripts de manutenção executados com esse role — use `DELETE FROM` para garantir compatibilidade. A criação de índices também é condicional (`CREATE INDEX IF NOT EXISTS`) para evitar erros de DDL em tabelas já existentes.
 
 ---
 
@@ -742,6 +853,24 @@ URL: https://portal1.snirh.gov.br/server/rest/services/SFI/
 
 Utilizado pela Etapa 1 do ETL em `widget_atualizacao_base.py`. Paginação de 2.000 feições por requisição, pausa de 2 s entre páginas, retry com backoff exponencial (2 s, 4 s, 8 s).
 
+**Autenticação ArcGIS Enterprise federada**
+
+O portal SNIRH (`portal1.snirh.gov.br`) opera em modo **Enterprise federado**, exigindo um token de portal em vez de um token de serviço direto. O fluxo correto, implementado em `widget_atualizacao_base.py`, é:
+
+1. Requisitar token ao endpoint `/sharing/rest/generateToken` do portal com `client='referer'` e o cabeçalho HTTP `Referer` preenchido com a URL do portal;
+2. Armazenar o token em uma configuração `QgsAuthMethodConfig` do tipo `EsriToken`;
+3. Usar o `authConfigId` resultante ao criar o provider `arcgismapserver` no QGIS — **nunca embutir o token diretamente na string URI**, pois o QGIS não encaminha tokens inline para serviços federados.
+
+```python
+# Fragmento ilustrativo — widget_atualizacao_base.py
+cfg = QgsAuthMethodConfig("EsriToken")
+cfg.setConfig("token", token)
+QgsApplication.authManager().storeAuthenticationConfig(cfg)
+uri = f"{MAPSERVER_URL}?authcfg={cfg.id()}"
+```
+
+> **Atenção:** tokens gerados com `client='requestip'` ou sem o cabeçalho `Referer` correto resultam em erro 498 (*Token Invalid*) ao acessar o serviço federado, mesmo que o token tenha sido gerado com sucesso.
+
 ### 11.3 ArcGIS REST Service — CAR Privado (autenticado)
 
 Serviço privado da ANA para dados do Cadastro Ambiental Rural (CAR), protegidos por LGPD. Fluxo de token temporário (2 horas) com exibição de termo de responsabilidade ao usuário antes de carregar os dados.
@@ -801,6 +930,18 @@ Todos os relatórios Excel exportados pelo plugin utilizam `openpyxl` com o segu
 | Alinhamento | Centralizado com `wrap_text=True` |
 
 Arquivos salvos na pasta **Downloads** do usuário do SO. Nome com timestamp: ex. `MEDIDORES_TODOS_20260301_143022.xlsx`.
+
+> **Workaround `lxml` + `openpyxl` (Python 3.12 / QGIS 3.3x, Windows):** o `openpyxl` usa internamente `copy(DEFAULT_FONT)` ao instanciar `Workbook()`, o que aciona o serializador `lxml.etree` se esse módulo estiver carregado no `sys.modules`. No QGIS ≥ 3.34 em Windows com Python 3.12, isso causa um *access violation* silencioso. A solução aplicada em todos os métodos de geração de XLSX do plugin é mascarar temporariamente o `lxml` do `sys.modules` durante a instanciação do `Workbook`, restaurando-o no bloco `finally`:
+> ```python
+> import sys as _sys
+> _lxml_mod   = _sys.modules.pop('lxml',       None)
+> _lxml_etree = _sys.modules.pop('lxml.etree', None)
+> try:
+>     wb = Workbook()
+> finally:
+>     if _lxml_mod   is not None: _sys.modules['lxml']       = _lxml_mod
+>     if _lxml_etree is not None: _sys.modules['lxml.etree'] = _lxml_etree
+> ```
 
 ### 13.2 Exportação de gráficos PNG
 
@@ -970,7 +1111,7 @@ python -m pip install openpyxl
 
 - Verificar acesso manual à URL do MapServer no navegador;
 - O plugin retenta 3× por página com backoff exponencial; falhas persistentes indicam instabilidade no portal SNIRH/ANA;
-- Aguardar e tentar novamente — o `TRUNCATE` só ocorre após conexão bem-sucedida ao serviço, preservando os dados anteriores em caso de falha precoce.
+- Aguardar e tentar novamente — a limpeza da tabela (`TRUNCATE` ou `DELETE FROM`) só ocorre após conexão bem-sucedida ao serviço, preservando os dados anteriores em caso de falha precoce.
 
 ### ETL Etapa 2 falha com "driver Oracle não encontrado"
 
@@ -990,6 +1131,28 @@ Verificar se as assinaturas de `QgsCoordinateTransform`, `QgsVectorLayerUtils` o
 ### Janela congelada durante carregamento de dados
 
 Confirmar que a operação demorada está sendo executada em `QThread` dedicada (ver [Seção 9](#9-processamento-assíncrono-threads-qt)). Operações longas na thread principal bloqueiam o loop de eventos do Qt e congelam toda a interface do QGIS.
+
+### ETL Etapa 1 falha com `InsufficientPrivilege` ao limpar tabela
+
+O role `telemetria_rw` não é owner das tabelas ETL no RDS e pode não ter privilégio de `TRUNCATE`. O plugin trata isso automaticamente (fallback para `DELETE FROM`), mas se o log exibir a mensagem `⚠ Sem permissão para TRUNCATE. Tentando DELETE...` repetidamente a cada execução, o comportamento é esperado e não indica falha — os dados são limpos corretamente via `DELETE FROM`. Para restaurar `TRUNCATE` como operação primária, o DBA deve executar:
+
+```sql
+GRANT TRUNCATE ON tb_mapserver_obrigatoriedade, tb_mv_sfi_cnarh40 TO telemetria_rw;
+```
+
+### ETL Etapa 1 falha com erro 498 "Token Invalid" ao acessar o MapServer
+
+O portal SNIRH opera em modo Enterprise federado. Token gerado sem `client='referer'` ou sem o cabeçalho HTTP `Referer` correto é rejeitado com erro 498, mesmo parecendo válido. Verificar:
+
+1. Se `PORTAL_URL` em `widget_atualizacao_base.py` aponta para o portal correto (`portal1.snirh.gov.br`);
+2. Se a requisição de token usa `client=referer` e envia `Referer: <PORTAL_URL>` no cabeçalho;
+3. Se o `QgsAuthMethodConfig` está sendo criado com o método `EsriToken` (não `Basic` ou `EsriUserPass`).
+
+Não embutir o token diretamente na string URI do provider `arcgismapserver` — o QGIS não encaminha tokens inline para serviços federados.
+
+### Exportação XLSX trava ou gera *access violation* no Windows (QGIS 3.3x / Python 3.12)
+
+Causado por conflito entre `openpyxl` e `lxml` durante a instanciação de `Workbook()`. O plugin já aplica o workaround de mascaramento do `lxml` em `sys.modules` (ver [Seção 13.1](#131-padrão-de-formatação-xlsx-institucional)). Se o problema ocorrer em um novo método de exportação adicionado posteriormente, garantir que o padrão de mascaramento esteja presente antes de `wb = Workbook()`. **Não instalar nem desinstalar `lxml` como solução** — isso pode quebrar outras funcionalidades do QGIS que dependem do módulo.
 
 ### `ModuleNotFoundError` ao importar módulo do plugin
 

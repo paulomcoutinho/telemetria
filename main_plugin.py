@@ -556,6 +556,20 @@ class TelaInicial(QWidget):
         frame_geometry.moveCenter(center_point)  # Move o centro da janela para o centro da tela
         self.move(frame_geometry.topLeft())  # Move a janela para a posição correta
 
+    def abrir_gestao_dados(self):
+        """Abre tela de gestão de dados com conexão estabelecida."""
+        self.tela_gestao = JanelaGestaoDados(self, self.conn, self.usuario_logado, self.senha)
+        self.tela_gestao.show()
+        self._janelas_abertas.append(self.tela_gestao)
+        self.hide()
+
+    def abrir_monitoramento(self):
+        """Abre tela de monitoramento com conexão estabelecida."""
+        self.tela_monitoramento = JanelaMonitoramento(self, self.conn, self.usuario_logado, self.senha)
+        self.tela_monitoramento.show()
+        self._janelas_abertas.append(self.tela_monitoramento)
+        self.hide()
+        
     def abrir_cadastro_operadores(self):
         """Abre tela de cadastro de operadores com conexão estabelecida."""
         self.tela_operadores = TelaCadastroOperadores(self, self.conn)
@@ -573,20 +587,6 @@ class TelaInicial(QWidget):
         )
         self.tela_medidores.show()
         self._janelas_abertas.append(self.tela_medidores)
-        self.hide()
-
-    def abrir_gestao_dados(self):
-        """Abre tela de gestão de dados com conexão estabelecida."""
-        self.tela_gestao = JanelaGestaoDados(self, self.conn, self.usuario_logado, self.senha)
-        self.tela_gestao.show()
-        self._janelas_abertas.append(self.tela_gestao)
-        self.hide()
-
-    def abrir_monitoramento(self):
-        """Abre tela de monitoramento com conexão estabelecida."""
-        self.tela_monitoramento = JanelaMonitoramento(self, self.conn, self.usuario_logado, self.senha)
-        self.tela_monitoramento.show()
-        self._janelas_abertas.append(self.tela_monitoramento)
         self.hide()
 
     def closeEvent(self, event):

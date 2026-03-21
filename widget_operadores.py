@@ -806,6 +806,65 @@ class WidgetOperadores(QWidget):
                                 ELSE 'Não outorgado'
                            END AS tipo_operador
                          , ot.data AS data_cadastro
+
+                         -- Rótulos dos medidores de teste (contém '999')
+                         , (
+                               SELECT STRING_AGG(DISTINCT i2.rotulo::text, ', '
+                                                 ORDER BY i2.rotulo::text)
+                               FROM public.tb_intervencao i2
+                               --JOIN public.tb_telemetria_intervencao_diaria ttid2
+                                 --ON ttid2.intervencao_id = i2.id
+                               WHERE i2.operador_telemetria = ot.id
+                                 AND i2.rotulo::text LIKE '%%999%%'
+                                 --AND ttid2.consumo_diario > 0
+                           ) AS ds_medidores_teste
+
+                         -- Rótulos dos medidores reais
+                         , (
+                               SELECT STRING_AGG(DISTINCT i2.rotulo::text, ', '
+                                                 ORDER BY i2.rotulo::text)
+                               FROM public.tb_intervencao i2
+                               JOIN public.tb_telemetria_intervencao_diaria ttid2
+                                 ON ttid2.intervencao_id = i2.id
+                               WHERE i2.operador_telemetria = ot.id
+                                 AND i2.rotulo::text NOT LIKE '%%999%%'
+                                 AND i2.rotulo::text NOT LIKE 'VERDE GRANDE%%'
+                                 AND i2.rotulo::text NOT LIKE '%%#'
+                                 AND ttid2.consumo_diario > 0
+                           ) AS ds_medidores_reais
+
+                         -- CNARHs (numero_cadastro de tb_interferencia) distintos dos medidores reais
+                         , (
+                               SELECT STRING_AGG(DISTINCT inf2.numero_cadastro::text, ', '
+                                                 ORDER BY inf2.numero_cadastro::text)
+                               FROM public.tb_intervencao i2
+                               JOIN public.tb_telemetria_intervencao_diaria ttid2
+                                 ON ttid2.intervencao_id = i2.id
+                               JOIN public.tb_intervencao_interferencia ii2
+                                 ON ii2.intervencao_id = i2.id
+                               JOIN public.tb_interferencia inf2
+                                 ON inf2.id = ii2.interferencia_id
+                               WHERE i2.operador_telemetria = ot.id
+                                 AND i2.rotulo::text NOT LIKE '%%999%%'
+                                 AND i2.rotulo::text NOT LIKE 'VERDE GRANDE%%'
+                                 AND i2.rotulo::text NOT LIKE '%%#'
+                                 AND inf2.numero_cadastro NOT LIKE 'TESTE'
+                                 AND ttid2.consumo_diario > 0
+                           ) AS cnarhs_reais
+
+                         -- Última data com dado transmitido (medidores reais)
+                         , (
+                               SELECT MAX(ttid2.data)
+                               FROM public.tb_intervencao i2
+                               JOIN public.tb_telemetria_intervencao_diaria ttid2
+                                 ON ttid2.intervencao_id = i2.id
+                               WHERE i2.operador_telemetria = ot.id
+                                 AND i2.rotulo::text NOT LIKE '%%999%%'
+                                 AND i2.rotulo::text NOT LIKE 'VERDE GRANDE%%'
+                                 AND i2.rotulo::text NOT LIKE '%%#'
+                                 AND ttid2.consumo_diario > 0
+                           ) AS ultima_data
+
                     FROM public.tb_operador_telemetria ot
                     WHERE ot.id IN (
                         SELECT DISTINCT i.operador_telemetria
@@ -814,6 +873,7 @@ class WidgetOperadores(QWidget):
                           ON ttid.intervencao_id = i.id
                         WHERE i.rotulo::text NOT LIKE '%%999%%'
                           AND i.rotulo::text NOT LIKE 'VERDE GRANDE%%'
+                          AND i.rotulo::text NOT LIKE '%%#'
                           AND i.longitude IS NOT NULL
                           AND i.latitude  IS NOT NULL
                           AND ttid.consumo_diario > 0
@@ -879,9 +939,16 @@ class WidgetOperadores(QWidget):
         ws = wb.active
         ws.title = "Operadores"
 
-        larguras = [6, 40, 38, 22, 26, 18]
-        colunas  = ["ID", "Nome", "E-mail", "Nº Cadastro / CPF / CNPJ",
-                    "Operador", "Data de Cadastro"]
+        if somente_ativos:
+            larguras = [6, 36, 34, 26, 16, 16, 26, 30, 35, 18]
+            colunas  = ["ID", "Nome", "E-mail", "Nº Cadastro / CPF / CNPJ",
+                        "Operador", "Data de Cadastro",
+                        "Medidores de Teste", "Medidores Reais",
+                        "CNARHs c/ Medidores Reais", "Última Data c/ Dado"]
+        else:
+            larguras = [6, 40, 38, 22, 26, 18]
+            colunas  = ["ID", "Nome", "E-mail", "Nº Cadastro / CPF / CNPJ",
+                        "Operador", "Data de Cadastro"]
         n_cols   = len(colunas)
         col_last = get_column_letter(n_cols)
 
@@ -917,7 +984,12 @@ class WidgetOperadores(QWidget):
 
         # Linhas de dados
         for idx, row_data in enumerate(linhas, start=4):
-            id_num, nome, email, num_cad, tipo, data_cad = row_data
+            if somente_ativos:
+                id_num, nome, email, num_cad, tipo, data_cad, \
+                    ds_teste, ds_reais, cnarhs, ultima_data = row_data
+            else:
+                id_num, nome, email, num_cad, tipo, data_cad = row_data
+                ds_teste = ds_reais = cnarhs = ultima_data = None
 
             if data_cad:
                 try:
@@ -927,8 +999,22 @@ class WidgetOperadores(QWidget):
             else:
                 data_str = "—"
 
-            valores    = [id_num, nome or "—", email or "—",
-                          num_cad or "—", tipo or "—", data_str]
+            if ultima_data:
+                try:
+                    ultima_data_str = ultima_data.strftime("%d/%m/%Y") if hasattr(ultima_data, 'strftime') else str(ultima_data)
+                except Exception:
+                    ultima_data_str = str(ultima_data)
+            else:
+                ultima_data_str = "—"
+
+            if somente_ativos:
+                valores = [id_num, nome or "—", email or "—",
+                           num_cad or "—", tipo or "—", data_str,
+                           ds_teste or "—", ds_reais or "—",
+                           cnarhs or "—", ultima_data_str]
+            else:
+                valores = [id_num, nome or "—", email or "—",
+                           num_cad or "—", tipo or "—", data_str]
             fill_linha = fill_alt if (idx % 2 == 0) else None
 
             for ci, val in enumerate(valores, 1):

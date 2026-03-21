@@ -213,7 +213,8 @@ class JanelaGraficosMedidor(QWidget):
     def __init__(self, janela_anterior, conexao, lista_ids_medidores, lista_dados_medidores, 
                  usuario=None, senha=None, nome_usuario=None, modo_agregacao=None, 
                  criterio_busca=None, termo_busca=None, nome_completo=None,
-                 eh_multipla_interferencia=False, codigos_interf=None, is_selecao_total=False):
+                 eh_multipla_interferencia=False, codigos_interf=None, is_selecao_total=False,
+                 ano_inicial=None, mes_inicial=None):
         super().__init__()
         self.janela_anterior = janela_anterior
         self.conn = conexao
@@ -229,7 +230,9 @@ class JanelaGraficosMedidor(QWidget):
         self.eh_multipla_interferencia = eh_multipla_interferencia
         self.codigos_interf = codigos_interf if codigos_interf else set()
         self.modo_agregacao_atual = modo_agregacao
-        self.is_selecao_total = is_selecao_total        
+        self.is_selecao_total = is_selecao_total
+        self.ano_inicial = ano_inicial
+        self.mes_inicial = mes_inicial        
         
         self.colunas_ocultas_mensal = []  
         self.colunas_ocultas_diario = []
@@ -278,6 +281,9 @@ class JanelaGraficosMedidor(QWidget):
             
         self.initUI()
         
+        if self.ano_inicial is not None:
+            self.combo_ano_mensal.setCurrentText(str(self.ano_inicial))
+            
     def initUI(self):
         """Configura a interface da janela de gráficos."""
         try:

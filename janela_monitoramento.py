@@ -28,7 +28,8 @@ from qgis.PyQt.QtWidgets import (
     QSizePolicy, QAbstractItemView, QHeaderView,
     QDateEdit, QCheckBox, QListWidget, QListWidgetItem,
     QDialog, QFrame, QProgressBar, QTableWidget, QTableWidgetItem,
-    QTabWidget, QApplication, QGraphicsDropShadowEffect, QDesktopWidget
+    QTabWidget, QApplication, QGraphicsDropShadowEffect, QDesktopWidget,
+    QRadioButton,
 )
 from qgis.PyQt.QtCore import Qt, QDate, QTimer
 
@@ -52,6 +53,8 @@ from qgis.gui import QgsMapCanvas
 # Imports Python padrão
 # ---------------------------------------------------------------------------
 import psycopg2
+import os
+from datetime import date
 
 # ---------------------------------------------------------------------------
 # Sistema de design centralizado
@@ -348,19 +351,16 @@ class JanelaMonitoramento(QWidget):
         self.setLayout(layout)
 
     def _perguntar_verificacao_consumo(self):
-        """Diálogo de seleção de período — 6 meses (checkboxes) OU intervalo livre.
+        """Diálogo de seleção de período — 12 meses (checkboxes) OU intervalo livre.
  
         Apresenta dois RadioButtons para alternar o modo de verificação:
-          • **6 últimos meses** — checkboxes com os 6 meses recentes (padrão).
+          • **12 últimos meses** — checkboxes com os 12 meses recentes (padrão).
           • **Por período** — dois QDateEdit (início / fim) com calendário popup.
  
         Ao confirmar, define:
           - ``self.meses_para_verificar`` — lista de itens de fila.
           - ``self._modo_verificacao``    — ``'mensal'`` ou ``'por_periodo'``.
         """
-        from datetime import date
-        from qgis.PyQt.QtWidgets import QRadioButton, QStackedWidget, QDateEdit
-        from qgis.PyQt.QtCore import QDate
  
         hoje        = date.today()
         nomes_meses = [
@@ -368,9 +368,9 @@ class JanelaMonitoramento(QWidget):
             "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
         ]
  
-        # Gera 6 meses: atual primeiro, depois os 5 anteriores
+        # Gera 12 meses: atual primeiro, depois os 11 anteriores
         self._meses_opcoes = []
-        for i in range(6):
+        for i in range(12):
             mes_num = hoje.month - i
             ano_num = hoje.year
             while mes_num < 1:
@@ -387,7 +387,7 @@ class JanelaMonitoramento(QWidget):
  
         dialog = QDialog(self)
         dialog.setWindowTitle("Verificação de Consumo")
-        dialog.setMinimumSize(440, 560)
+        dialog.setMinimumSize(440, 740)
         dialog.setModal(True)
  
         layout = QVBoxLayout(dialog)
@@ -461,7 +461,7 @@ class JanelaMonitoramento(QWidget):
         radio_layout = QHBoxLayout()
         radio_layout.setSpacing(20)
  
-        self._radio_meses   = QRadioButton("6 últimos meses")
+        self._radio_meses   = QRadioButton("12 últimos meses")
         self._radio_periodo = QRadioButton("Por período")
         self._radio_meses.setStyleSheet(estilo_radio)
         self._radio_periodo.setStyleSheet(estilo_radio)
@@ -473,14 +473,15 @@ class JanelaMonitoramento(QWidget):
         container_layout.addLayout(radio_layout)
  
         # ── QStackedWidget ─────────────────────────────────────────────────
-        stacked = QStackedWidget()
+        #stacked = QStackedWidget()
+        #stacked.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
  
         # ── Painel 0: checkboxes de meses ─────────────────────────────────
         painel_meses = QWidget()
         pm_layout = QVBoxLayout(painel_meses)
         pm_layout.setContentsMargins(0, 4, 0, 0)
         pm_layout.setSpacing(6)
- 
+
         estilo_chk = f"""
             QCheckBox {{
                 font-size: 12px; color: #343a40; spacing: 8px;
@@ -497,7 +498,7 @@ class JanelaMonitoramento(QWidget):
         checkbox_layout = QVBoxLayout()
         checkbox_layout.setSpacing(8)
         checkbox_layout.setContentsMargins(20, 5, 20, 5)
- 
+
         self._checkboxes_meses = []
         for opcao in self._meses_opcoes:
             chk = QCheckBox(opcao['label'])
@@ -505,9 +506,9 @@ class JanelaMonitoramento(QWidget):
             chk.setChecked(opcao['tipo'] in ('atual', 'anterior_1'))
             checkbox_layout.addWidget(chk)
             self._checkboxes_meses.append(chk)
- 
+
         pm_layout.addLayout(checkbox_layout)
- 
+
         btn_sel_todos = QPushButton("Selecionar todos")
         btn_sel_todos.setCursor(Qt.PointingHandCursor)
         btn_sel_todos.setStyleSheet(f"""
@@ -520,83 +521,85 @@ class JanelaMonitoramento(QWidget):
             }}
             QPushButton:hover {{ background-color: #e8f0fe; }}
         """)
- 
+
         def _toggle_selecao():
             todos = all(c.isChecked() for c in self._checkboxes_meses)
             for c in self._checkboxes_meses:
                 c.setChecked(not todos)
             btn_sel_todos.setText("Selecionar todos" if todos else "Limpar seleção")
- 
+
         def _sync_label():
             todos = all(c.isChecked() for c in self._checkboxes_meses)
             btn_sel_todos.setText("Limpar seleção" if todos else "Selecionar todos")
- 
+
         for chk in self._checkboxes_meses:
             chk.stateChanged.connect(lambda _: _sync_label())
         btn_sel_todos.clicked.connect(_toggle_selecao)
- 
+
         sel_layout = QHBoxLayout()
         sel_layout.addStretch()
         sel_layout.addWidget(btn_sel_todos)
         pm_layout.addLayout(sel_layout)
- 
-        stacked.addWidget(painel_meses)   # índice 0
- 
-        # ── Painel 1: seleção por período (QDateEdit) ──────────────────────
+
+        container_layout.addWidget(painel_meses)
+
+        # ── Painel de período (QDateEdit) ──────────────────────────────────
         painel_periodo = QWidget()
         pp_layout = QGridLayout(painel_periodo)
         pp_layout.setContentsMargins(20, 10, 20, 10)
         pp_layout.setSpacing(10)
- 
+
         estilo_date = """
             QDateEdit {
                 border: 1px solid #ccc; border-radius: 4px;
                 padding: 5px; font-size: 12px;
             }
         """
- 
+
         lbl_di = QLabel("Data início:")
         lbl_di.setStyleSheet("font-size: 12px; color: #343a40;")
         pp_layout.addWidget(lbl_di, 0, 0)
- 
+
         self._date_inicio = QDateEdit()
         self._date_inicio.setCalendarPopup(True)
         self._date_inicio.setDisplayFormat("dd/MM/yyyy")
-        # Padrão: 1º dia do mês anterior
         self._date_inicio.setDate(QDate(hoje.year, hoje.month, 1).addMonths(-1))
         self._date_inicio.setStyleSheet(estilo_date)
         pp_layout.addWidget(self._date_inicio, 0, 1)
- 
+
         lbl_df = QLabel("Data fim:")
         lbl_df.setStyleSheet("font-size: 12px; color: #343a40;")
         pp_layout.addWidget(lbl_df, 1, 0)
- 
+
         self._date_fim = QDateEdit()
         self._date_fim.setCalendarPopup(True)
         self._date_fim.setDisplayFormat("dd/MM/yyyy")
-        # Padrão: último dia do mês anterior
         self._date_fim.setDate(QDate(hoje.year, hoje.month, 1).addDays(-1))
         self._date_fim.setStyleSheet(estilo_date)
         pp_layout.addWidget(self._date_fim, 1, 1)
- 
-        lbl_info = QLabel(
-            "ℹ️ O outorgado será calculado pro-rata\n"
-            "com base nos dias do intervalo selecionado."
-        )
-        lbl_info.setStyleSheet("font-size: 10px; color: #6c757d; margin-top: 5px;")
-        pp_layout.addWidget(lbl_info, 2, 0, 1, 2)
- 
-        stacked.addWidget(painel_periodo)  # índice 1
- 
-        container_layout.addWidget(stacked)
- 
-        # Conectar RadioButtons → QStackedWidget
-        self._radio_meses.toggled.connect(
-            lambda checked: stacked.setCurrentIndex(0) if checked else None
-        )
-        self._radio_periodo.toggled.connect(
-            lambda checked: stacked.setCurrentIndex(1) if checked else None
-        )
+
+        painel_periodo.setVisible(False)   # oculto por padrão
+        container_layout.addWidget(painel_periodo)
+
+        # ── Conectar RadioButtons → show/hide ─────────────────────────────
+        def _on_radio_meses(checked):
+            if checked:
+                painel_periodo.setVisible(False)
+                painel_meses.setVisible(True)
+                dialog.setMinimumSize(0, 0)
+                dialog.setMinimumSize(440, 740)
+                dialog.resize(440, 740)
+
+        def _on_radio_periodo(checked):
+            if checked:
+                painel_meses.setVisible(False)
+                painel_periodo.setVisible(True)
+                dialog.setMinimumSize(0, 0)
+                dialog.resize(440, 420)
+                dialog.setMinimumSize(440, 420)
+
+        self._radio_meses.toggled.connect(_on_radio_meses)
+        self._radio_periodo.toggled.connect(_on_radio_periodo)
  
         # Aviso de validação
         self.lbl_aviso_selecao = QLabel("⚠️ Selecione pelo menos um período!")
@@ -671,6 +674,7 @@ class JanelaMonitoramento(QWidget):
  
             # ── Modo: por período ──────────────────────────────────────────
             else:
+                import calendar as _cal
                 from datetime import date as _date
                 qi = self._date_inicio.date()
                 qf = self._date_fim.date()
@@ -683,16 +687,37 @@ class JanelaMonitoramento(QWidget):
                     self.lbl_aviso_selecao.setVisible(True)
                     return
                 self.lbl_aviso_selecao.setVisible(False)
-                label = f"{di.strftime('%d/%m/%Y')} a {df.strftime('%d/%m/%Y')}"
-                self.meses_para_verificar = [{
-                    'mes':         di.month,
-                    'ano':         di.year,
-                    'nome':        label,
-                    'label':       label,
-                    'tipo':        'periodo',
-                    'data_inicio': di,
-                    'data_fim':    df,
-                }]
+
+                nomes_meses = [
+                    "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho",
+                    "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
+                ]
+                # Expandir o intervalo em itens mensais independentes
+                self.meses_para_verificar = []
+                cur = _date(di.year, di.month, 1)
+                while cur <= df:
+                    ultimo_dia  = _cal.monthrange(cur.year, cur.month)[1]
+                    inicio_mes  = max(di, _date(cur.year, cur.month, 1))
+                    fim_mes     = min(df, _date(cur.year, cur.month, ultimo_dia))
+                    nome_mes    = f"{nomes_meses[cur.month - 1]}/{cur.year}"
+                    sufixo_dias = (
+                        f" ({inicio_mes.strftime('%d/%m')} a {fim_mes.strftime('%d/%m')})"
+                        if (inicio_mes.day != 1 or fim_mes.day != ultimo_dia)
+                        else ""
+                    )
+                    self.meses_para_verificar.append({
+                        'mes':         cur.month,
+                        'ano':         cur.year,
+                        'nome':        nome_mes + sufixo_dias,
+                        'label':       nome_mes + sufixo_dias,
+                        'tipo':        f"periodo_{cur.year}_{cur.month:02d}",
+                        'data_inicio': inicio_mes,
+                        'data_fim':    fim_mes,
+                    })
+                    # Avança para o 1º do próximo mês
+                    cur = (_date(cur.year + 1, 1, 1) if cur.month == 12
+                           else _date(cur.year, cur.month + 1, 1))
+
                 self._modo_verificacao = 'por_periodo'
  
             dialog.accept()
@@ -732,7 +757,7 @@ class JanelaMonitoramento(QWidget):
         meses      = self.meses_para_verificar
         quantidade = len(meses)
         texto_meses = "<br>• ".join(
-            m['nome'] if m.get('tipo') == 'periodo'
+            m['nome'] if (m.get('tipo', '').startswith('periodo') or str(m['ano']) in m['nome'])
             else f"{m['nome']}/{m['ano']}"
             for m in meses
         )
@@ -892,7 +917,8 @@ class JanelaMonitoramento(QWidget):
         # Rótulo correto na fila de progresso
         linhas_fila = "<b>Fila de processamento:</b><br>" + "".join(
             f"<span style='color:#6c757d;'>• "
-            + (m['nome_mes'] if m.get('modo') == 'por_periodo'
+            + (m['nome_mes'] if (m.get('modo') == 'por_periodo'
+               or str(m['ano']) in m['nome_mes'])
                else f"{m['nome_mes']}/{m['ano']}")
             + "</span><br>"
             for m in self.fila_processamento
@@ -1034,7 +1060,7 @@ class JanelaMonitoramento(QWidget):
             tipo        = opcao['tipo']
             # Rótulo correto para cada item da fila
             label_opcao = (
-                opcao['nome'] if tipo == 'periodo'
+                opcao['nome'] if (tipo.startswith('periodo') or str(opcao['ano']) in opcao['nome'])
                 else f"{opcao['nome']}/{opcao['ano']}"
             )
             if tipo == item_atual['tipo']:
@@ -1062,22 +1088,31 @@ class JanelaMonitoramento(QWidget):
             
     def _on_item_fila_concluido(self, resultados, nome_mes, ano, tipo):
         """Callback quando um item da fila termina."""
+        # Recuperar mes e data_inicio do item atual para permitir ordenação
+        item = getattr(self, 'item_atual_processamento', {})
+
+        # Separar alertas (exibição na tela) de informativos (somente Excel)
+        alertas      = [r for r in resultados if len(r) <= 9 or r[9]]
+        informativos = [r for r in resultados if len(r) > 9 and not r[9]]
+
         self.resultados_processamento[tipo] = {
-            'resultados': resultados,
-            'nome_mes': nome_mes,
-            'ano': ano
+            'resultados':      alertas,       # apenas alertas → tela
+            'informativos':    informativos,  # dentro do limite → só Excel
+            'nome_mes':        nome_mes,
+            'ano':             ano,
+            'mes':             item.get('mes', 0),
+            'data_inicio':     item.get('data_inicio'),
         }
-        
-        # Atualizar mensagem como concluído
+
         self._atualizar_mensagem_progresso(self.item_atual_processamento, 'concluido')
-        
-        if resultados:
-            print(f"[INFO] {tipo}: {len(resultados)} interferências com consumo acima do outorgado")
+
+        if alertas:
+            print(f"[INFO] {tipo}: {len(alertas)} alertas, {len(informativos)} informativos")
         else:
-            print(f"[INFO] {tipo}: Nenhuma interferência com consumo acima do outorgado")
+            print(f"[INFO] {tipo}: Nenhum alerta. {len(informativos)} registros informativos.")
 
     def _finalizar_processamento_fila(self):
-        """Finaliza a fila e exibe resultados."""
+        """Finaliza a fila, ordena cronologicamente e por consumo, e exibe."""
         QApplication.restoreOverrideCursor()
 
         if self.progress_dialog:
@@ -1092,6 +1127,55 @@ class JanelaMonitoramento(QWidget):
             if dados is not None:
                 meses_com_resultado.append(dados)
 
+        # ── 1. Ordenação cronológica dos meses ────────────────────────────────
+        # Mensal    → chave = (ano, mes, 0)
+        # Por_periodo → chave = (ano, mes, dia) de data_inicio
+        def _chave_ordem(d):
+            di = d.get('data_inicio')
+            if di:
+                return (di.year, di.month, di.day)
+            return (d.get('ano', 0), d.get('mes', 0), 0)
+
+        meses_com_resultado.sort(key=_chave_ordem)
+
+        # ── 2. Ordenação das interferências por consumo ───────────────────────
+        # Referência: consumo do mês mais antigo que contém a interferência.
+        # Fallback: próximo mês disponível em ordem cronológica.
+        # Resultado: todas as listas de meses ficam na mesma ordem global,
+        # garantindo alinhamento entre abas e colunas do Excel.
+        if meses_com_resultado:
+            # Índice por mês (já em ordem cronológica): {cod_interf: consumo}
+            consumo_por_mes = [
+                {r[0]: float(r[6]) if len(r) > 6 else 0.0
+                 for r in (d.get('resultados') or [])}
+                for d in meses_com_resultado
+            ]
+
+            # União de todas as interferências encontradas em qualquer mês
+            todas_interf = {
+                r[0]
+                for d in meses_com_resultado
+                for r in (d.get('resultados') or [])
+            }
+
+            def _chave_consumo(cod_interf):
+                """Retorna o consumo negativo do mês mais antigo com dados
+                para esta interferência (negativo → sort descendente)."""
+                for idx_c in consumo_por_mes:
+                    if cod_interf in idx_c:
+                        return -idx_c[cod_interf]
+                return 0.0
+
+            # Ordem global: maior consumo (mês mais antigo) primeiro
+            ordem_interf = sorted(todas_interf, key=_chave_consumo)
+            pos          = {cod: i for i, cod in enumerate(ordem_interf)}
+
+            # Aplicar a mesma ordem a todos os meses
+            for d in meses_com_resultado:
+                if d.get('resultados'):
+                    d['resultados'].sort(key=lambda r: pos.get(r[0], 999999))
+
+        # ── 3. Exibir resultado ───────────────────────────────────────────────
         if any(d.get('resultados') for d in meses_com_resultado):
             self.mostrar_alerta_consumo_abas(meses_com_resultado)
         else:
@@ -1210,7 +1294,7 @@ class JanelaMonitoramento(QWidget):
                 background-color: #f8f9fa; border: 1px solid #dee2e6;
                 border-bottom: none; border-top-left-radius: 8px;
                 border-top-right-radius: 8px; padding: 10px 20px;
-                min-width: 150px; font-weight: bold; font-size: 12px; color: #6c757d;
+                min-width: 180px; font-weight: bold; font-size: 12px; color: #6c757d;
             }
             QTabBar::tab:selected {
                 background-color: #ffffff; color: #343a40;
@@ -1227,23 +1311,46 @@ class JanelaMonitoramento(QWidget):
         lista_validos = [d for d in lista_meses if d and d.get('resultados') is not None]
         if len(lista_validos) == 1:
             self.tab_widget.tabBar().setVisible(False)
+
+        MESES_ABREV = {
+            "Janeiro": "Jan", "Fevereiro": "Fev", "Março": "Mar",
+            "Abril": "Abr", "Maio": "Mai", "Junho": "Jun",
+            "Julho": "Jul", "Agosto": "Ago", "Setembro": "Set",
+            "Outubro": "Out", "Novembro": "Nov", "Dezembro": "Dez",
+        }
+
+        def _abreviar_rotulo(rotulo):
+            """Jan/2026 (14/01 a 31/01) · 6  →  cabe em min-width:150px"""
+            for ext, abrev in MESES_ABREV.items():
+                rotulo = rotulo.replace(ext, abrev)
+            return rotulo
  
         for idx, dados_mes in enumerate(lista_meses):
             if dados_mes and dados_mes.get('resultados') is not None:
                 identificador = f"mes_{idx}"
                 n = len(dados_mes['resultados'])
+
+                # ano=0 ocorre no modo por_periodo — usar data_inicio como fonte
+                ano_aba = dados_mes.get('ano') or 0
+                mes_aba = dados_mes.get('mes') or 0
+                di      = dados_mes.get('data_inicio')
+                if (not ano_aba or not mes_aba) and di:
+                    ano_aba = di.year
+                    mes_aba = di.month
+
                 aba = self._criar_aba_mes(
                     dados_mes['resultados'],
                     dados_mes['nome_mes'],
-                    dados_mes['ano'],
+                    ano_aba,
+                    mes_aba,
                     identificador,
                 )
-                # Rótulo da aba: sem duplicar o ano no modo por_periodo
                 rotulo_aba = (
-                    dados_mes['nome_mes'] if not dados_mes.get('ano')
-                    else f"{dados_mes['nome_mes']}/{dados_mes['ano']}"
+                    dados_mes['nome_mes']
+                    if (not ano_aba or str(ano_aba) in dados_mes['nome_mes'])
+                    else f"{dados_mes['nome_mes']}/{ano_aba}"
                 )
-                self.tab_widget.addTab(aba, f"{rotulo_aba} ({n})")
+                self.tab_widget.addTab(aba, _abreviar_rotulo(f"{rotulo_aba} ({n})"))
  
         layout.addWidget(self.tab_widget)
  
@@ -1290,17 +1397,17 @@ class JanelaMonitoramento(QWidget):
         dialog.show()
         self._janelas_abertas.append(self.dialog_alerta)
         
-    def _criar_aba_mes(self, dados, nome_mes, ano, identificador_aba):
-        """Cria aba com tabela de 8 colunas para um mês/período."""
+    def _criar_aba_mes(self, dados, nome_mes, ano, mes_num, identificador_aba):
+        """Cria aba com tabela de 9 colunas para um mês/período."""
         aba = QWidget()
         al  = QVBoxLayout(aba)
         al.setContentsMargins(10, 10, 10, 10)
         al.setSpacing(5)
  
         tabela = QTableWidget()
-        tabela.setColumnCount(8)
+        tabela.setColumnCount(9)
         tabela.setHorizontalHeaderLabels([
-            "INT_CD", "CNARH", "Usuário", "Operador",
+            "INT_CD", "CNARH", "Empreendimento", "Usuário", "Operador",
             "Medidor(es)", "Consumo (m³)", "Outorgado (m³)", "% Acrescido",
         ])
         tabela.setStyleSheet("""
@@ -1318,6 +1425,7 @@ class JanelaMonitoramento(QWidget):
         self.dados_abas[identificador_aba] = {
             'original': list(dados), 'atual': list(dados),
             'nome_mes': nome_mes, 'ano': ano,
+            'mes_num':  mes_num,
         }
         self.ordem_abas[identificador_aba]   = {'coluna': None, 'decrescente': False}
         self.tabelas_abas[identificador_aba] = tabela
@@ -1334,14 +1442,15 @@ class JanelaMonitoramento(QWidget):
         self._preencher_tabela_aba(identificador_aba)
  
         hdr = tabela.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(2, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(3, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(4, QHeaderView.Stretch)
-        hdr.setSectionResizeMode(5, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(6, QHeaderView.ResizeToContents)
-        hdr.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # % Acrescido
+        hdr.setSectionResizeMode(0, QHeaderView.ResizeToContents)  # INT_CD
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)  # CNARH
+        hdr.setSectionResizeMode(2, QHeaderView.Stretch)           # Empreendimento
+        hdr.setSectionResizeMode(3, QHeaderView.Stretch)           # Usuário
+        hdr.setSectionResizeMode(4, QHeaderView.Stretch)           # Operador
+        hdr.setSectionResizeMode(5, QHeaderView.Stretch)           # Medidor(es)
+        hdr.setSectionResizeMode(6, QHeaderView.ResizeToContents)  # Consumo
+        hdr.setSectionResizeMode(7, QHeaderView.ResizeToContents)  # Outorgado
+        hdr.setSectionResizeMode(8, QHeaderView.ResizeToContents)  # % Acrescido
  
         tabela.setAlternatingRowColors(True)
         tabela.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1351,7 +1460,8 @@ class JanelaMonitoramento(QWidget):
         return aba
         
     def _preencher_tabela_aba(self, identificador_aba):
-        """Preenche a tabela de uma aba (8 colunas, incluindo % Acrescido)."""
+        """Preenche a tabela de uma aba (9 colunas, incluindo Empreendimento
+        e % Acrescido)."""
         tabela = self.tabelas_abas.get(identificador_aba)
         dados  = self.dados_abas.get(identificador_aba, {}).get('atual', [])
         if not tabela or not dados:
@@ -1361,17 +1471,27 @@ class JanelaMonitoramento(QWidget):
         tabela.setRowCount(len(dados))
  
         for row_idx, row_data in enumerate(dados):
-            # Unpacking seguro: suporta tuplas de 7 (legado) ou 8 elementos (novo)
-            cod_interf, cnarh, usuario, operador, rotulos, consumo, outorgado = row_data[:7]
-            outorgado_f = float(outorgado) if outorgado else 0.0
-            consumo_f   = float(consumo)   if consumo   else 0.0
-            # Percentual vem da thread (pos 7) ou é calculado como fallback
-            percentual  = float(row_data[7]) if len(row_data) > 7 else (
+            # Tupla da thread:
+            #   [0] cod_interf  [1] cnarh  [2] nome_empreendimento
+            #   [3] usuario     [4] operador  [5] rotulos
+            #   [6] consumo     [7] outorgado [8] percentual
+            cod_interf        = row_data[0]
+            cnarh             = row_data[1]
+            nome_empreend     = row_data[2] if len(row_data) > 2 else None
+            usuario           = row_data[3] if len(row_data) > 3 else None
+            operador          = row_data[4] if len(row_data) > 4 else None
+            rotulos           = row_data[5] if len(row_data) > 5 else None
+            consumo           = row_data[6] if len(row_data) > 6 else 0
+            outorgado         = row_data[7] if len(row_data) > 7 else 0
+            outorgado_f       = float(outorgado) if outorgado else 0.0
+            consumo_f         = float(consumo)   if consumo   else 0.0
+            percentual        = float(row_data[8]) if len(row_data) > 8 else (
                 round((consumo_f / outorgado_f - 1.0) * 100.0, 1) if outorgado_f > 0 else 0.0
             )
  
-            # Colunas de texto: INT_CD, CNARH, Usuário, Operador, Medidor(es)
-            for col, val in enumerate([cod_interf, cnarh, usuario, operador, rotulos]):
+            # Colunas de texto: cols 0-5
+            for col, val in enumerate([cod_interf, cnarh, nome_empreend,
+                                        usuario, operador, rotulos]):
                 item = QTableWidgetItem(str(val) if val else "N/A")
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 item.setData(Qt.UserRole,
@@ -1379,22 +1499,22 @@ class JanelaMonitoramento(QWidget):
                     else str(val).lower() if val else "")
                 tabela.setItem(row_idx, col, item)
  
-            # Consumo (col 5)
+            # Consumo (col 6)
             item = QTableWidgetItem(fmt(consumo))
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setForeground(QColor("#dc3545"))
             item.setFont(QFont("Arial", 9, QFont.Bold))
             item.setData(Qt.UserRole, consumo_f)
-            tabela.setItem(row_idx, 5, item)
+            tabela.setItem(row_idx, 6, item)
  
-            # Outorgado (col 6)
+            # Outorgado (col 7)
             item = QTableWidgetItem(fmt(outorgado))
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setForeground(QColor("#28a745"))
             item.setData(Qt.UserRole, outorgado_f)
-            tabela.setItem(row_idx, 6, item)
+            tabela.setItem(row_idx, 7, item)
  
-            # % Acrescido (col 7)
+            # % Acrescido (col 8)
             pct_txt = f"+{percentual:.1f}%".replace(".", ",")
             item = QTableWidgetItem(pct_txt)
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
@@ -1402,7 +1522,7 @@ class JanelaMonitoramento(QWidget):
             item.setForeground(QColor("#dc3545"))
             item.setFont(QFont("Arial", 9, QFont.Bold))
             item.setData(Qt.UserRole, percentual)
-            tabela.setItem(row_idx, 7, item)
+            tabela.setItem(row_idx, 8, item)
  
             # Destaque de linha: consumo > outorgado (limiar 100%)
             if outorgado_f > 0 and consumo_f > outorgado_f:
@@ -1414,17 +1534,18 @@ class JanelaMonitoramento(QWidget):
         if not dados_info:
             return
  
-        # (cod_interf[0], cnarh[1], usuario[2], operador[3], rotulos[4],
-        #  consumo[5], outorgado[6], percentual[7])
+        # [0]cod_interf  [1]cnarh  [2]empreendimento  [3]usuario  [4]operador
+        # [5]rotulos      [6]consumo  [7]outorgado  [8]percentual
         chaves = {
             0: lambda x: int(x[0]) if x[0] and str(x[0]).isdigit() else 0,
             1: lambda x: str(x[1] or "").lower(),
             2: lambda x: str(x[2] or "").lower(),
             3: lambda x: str(x[3] or "").lower(),
             4: lambda x: str(x[4] or "").lower(),
-            5: lambda x: float(x[5] or 0),
-            6: lambda x: float(x[6] or 0),
+            5: lambda x: str(x[5] or "").lower(),
+            6: lambda x: float(x[6]) if len(x) > 6 else 0.0,
             7: lambda x: float(x[7]) if len(x) > 7 else 0.0,
+            8: lambda x: float(x[8]) if len(x) > 8 else 0.0,
         }
         ordem = self.ordem_abas.get(identificador_aba, {'coluna': None, 'decrescente': False})
         if ordem['coluna'] == coluna:
@@ -1445,7 +1566,7 @@ class JanelaMonitoramento(QWidget):
         if not tabela:
             return
         titulos = [
-            "INT_CD", "CNARH", "Usuário", "Operador",
+            "INT_CD", "CNARH", "Empreendimento", "Usuário", "Operador",
             "Medidor(es)", "Consumo (m³)", "Outorgado (m³)", "% Acrescido",
         ]
         ind = " ▼" if decrescente else " ▲"
@@ -1464,11 +1585,17 @@ class JanelaMonitoramento(QWidget):
             return
         
         dados_interf = dados_atual[row]
-        cod_interf = dados_interf[0]
-        rotulos = dados_interf[4]
-        
-        # Reutilizar a lógica existente de abrir gráficos
-        self._abrir_graficos_interferencia(cod_interf, rotulos)
+        cod_interf   = dados_interf[0]
+        rotulos      = dados_interf[4]
+
+        # Recuperar mês e ano desta aba para pré-selecionar o gráfico
+        info_aba = self.dados_abas.get(identificador_aba, {})
+        ano_aba  = info_aba.get('ano') or ano
+        mes_aba  = info_aba.get('mes_num')  # definido em _criar_aba_mes
+
+        self._abrir_graficos_interferencia(cod_interf, rotulos,
+                                           ano_inicial=ano_aba,
+                                           mes_inicial=mes_aba)
 
     def _limpar_referencias_alerta_abas(self):
         """Limpa as referências das abas de alertas."""
@@ -1480,46 +1607,85 @@ class JanelaMonitoramento(QWidget):
     def _preencher_tabela_alerta(self):
         if not self.table_alerta or not self.dados_alerta_atual:
             return
-
+ 
         fmt = lambda v: f"{float(v):,.2f}".replace(",","X").replace(".",",").replace("X",".")
         self.table_alerta.setRowCount(len(self.dados_alerta_atual))
-
+ 
         for row_idx, row_data in enumerate(self.dados_alerta_atual):
-            (cod_interf, cnarh, usuario, operador, rotulos, consumo, outorgado) = row_data
-
-            for col, val in enumerate([cod_interf, cnarh, usuario, operador, rotulos]):
+            cod_interf    = row_data[0]
+            cnarh         = row_data[1]
+            nome_empreend = row_data[2] if len(row_data) > 2 else None
+            usuario       = row_data[3] if len(row_data) > 3 else None
+            operador      = row_data[4] if len(row_data) > 4 else None
+            rotulos       = row_data[5] if len(row_data) > 5 else None
+            consumo       = row_data[6] if len(row_data) > 6 else 0
+            outorgado     = row_data[7] if len(row_data) > 7 else 0
+            outorgado_f   = float(outorgado) if outorgado else 0.0
+            consumo_f     = float(consumo)   if consumo   else 0.0
+            percentual    = float(row_data[8]) if len(row_data) > 8 else (
+                round((consumo_f / outorgado_f - 1.0) * 100.0, 1) if outorgado_f > 0 else 0.0
+            )
+ 
+            for col, val in enumerate([cod_interf, cnarh, nome_empreend,
+                                        usuario, operador, rotulos]):
                 item = QTableWidgetItem(str(val) if val else "N/A")
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
                 item.setData(Qt.UserRole,
                     int(val) if col == 0 and val and str(val).isdigit()
                     else str(val).lower() if val else "")
                 self.table_alerta.setItem(row_idx, col, item)
-
+ 
+            # Consumo (col 6)
             item = QTableWidgetItem(fmt(consumo))
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setForeground(QColor("#dc3545"))
             item.setFont(QFont("Arial", 9, QFont.Bold))
-            item.setData(Qt.UserRole, float(consumo) if consumo else 0.0)
-            self.table_alerta.setItem(row_idx, 5, item)
-
+            item.setData(Qt.UserRole, consumo_f)
+            self.table_alerta.setItem(row_idx, 6, item)
+ 
+            # Outorgado (col 7)
             item = QTableWidgetItem(fmt(outorgado))
             item.setFlags(item.flags() & ~Qt.ItemIsEditable)
             item.setForeground(QColor("#28a745"))
-            item.setData(Qt.UserRole, float(outorgado) if outorgado else 0.0)
-            self.table_alerta.setItem(row_idx, 6, item)
-
-            if outorgado and float(consumo) > (float(outorgado) * 1.2):
-                for col in range(7):
+            item.setData(Qt.UserRole, outorgado_f)
+            self.table_alerta.setItem(row_idx, 7, item)
+ 
+            # % Acrescido (col 8)
+            pct_txt = f"+{percentual:.1f}%".replace(".", ",")
+            item = QTableWidgetItem(pct_txt)
+            item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+            item.setTextAlignment(Qt.AlignCenter)
+            item.setForeground(QColor("#dc3545"))
+            item.setFont(QFont("Arial", 9, QFont.Bold))
+            item.setData(Qt.UserRole, percentual)
+            self.table_alerta.setItem(row_idx, 8, item)
+ 
+            # Destaque de linha: consumo > outorgado (100%)
+            if outorgado_f > 0 and consumo_f > outorgado_f:
+                for col in range(self.table_alerta.columnCount()):
                     self.table_alerta.item(row_idx, col).setBackground(QColor("#f8d7da"))
-                    
+
     def exportar_alerta_excel_meses(self, lista_meses):
-        from datetime import datetime
+        """Exporta todos os meses verificados em um único arquivo Excel
+        com colunas de consumo/outorgado/% Acrescido lado a lado."""
         import os, sys
+        import unicodedata
+        from datetime import datetime
 
         meses_para_exportar = [d for d in lista_meses if d and d.get('resultados')]
         if not meses_para_exportar:
             QMessageBox.warning(self, "Aviso", "Nenhum dado para exportar.")
             return
+
+        # Workaround openpyxl + lxml no Python 3.12 / QGIS 3.3x (Windows)
+        try:
+            import sys as _sys
+            _lxml    = _sys.modules.pop('lxml',       None)
+            _lxml_et = _sys.modules.pop('lxml.etree', None)
+            from openpyxl import Workbook  # noqa
+        finally:
+            if _lxml    is not None: _sys.modules['lxml']       = _lxml
+            if _lxml_et is not None: _sys.modules['lxml.etree'] = _lxml_et
 
         try:
             downloads_path = (
@@ -1527,90 +1693,373 @@ class JanelaMonitoramento(QWidget):
                 if sys.platform == "win32"
                 else os.path.join(os.path.expanduser('~'), 'Downloads')
             )
-            ts = datetime.now().strftime('%Y%m%d_%H%M')
-            arquivos = []
 
-            for d in meses_para_exportar:
-                wb = self._criar_workbook_alerta(d['resultados'], d['nome_mes'], d['ano'])
-                nome = f"ALERTA_CONSUMO_{d['nome_mes']}_{d['ano']}_{ts}.xlsx"
-                wb.save(os.path.join(downloads_path, nome))
-                arquivos.append(f"• {nome}")
+            ts = datetime.now().strftime('%Y%m%d_%H%M')
+
+            def _san(txt):
+                txt = unicodedata.normalize('NFKD', str(txt))
+                txt = txt.encode('ascii', 'ignore').decode('ascii')
+                return "".join(c if c.isalnum() or c in ('_', '-') else '_' for c in txt)
+
+            if len(meses_para_exportar) == 1:
+                d   = meses_para_exportar[0]
+                rot = _san(d['nome_mes']) + (f"_{d['ano']}" if d.get('ano') else "")
+            else:
+                rot = f"{len(meses_para_exportar)}_periodos"
+
+            nome_arquivo = f"ALERTA_CONSUMO_{rot}_{ts}.xlsx"
+            caminho      = os.path.join(downloads_path, nome_arquivo)
+
+            wb = self._criar_workbook_alerta(meses_para_exportar)
+            wb.save(caminho)
 
             QMessageBox.information(
                 self, "Exportação Concluída",
-                f"Arquivo(s) salvo(s):\n" + "\n".join(arquivos) +
-                f"\n\nLocal: {downloads_path}"
+                f"Arquivo salvo em:\n{caminho}"
             )
         except Exception as e:
             QMessageBox.critical(self, "Erro", f"Erro ao exportar Excel:\n{str(e)}")
             import traceback; traceback.print_exc()
-            
-    def _criar_workbook_alerta(self, dados, nome_mes, ano):
+
+    def _criar_workbook_alerta(self, meses_para_exportar):
+        """Cria o Workbook consolidado com todos os meses em uma única aba.
+
+        Estrutura de colunas:
+            Fixas (6):  INT_CD | CNARH | Empreendimento | Usuário |
+                        Operador | Medidor(es)
+            Por mês (3 × N):
+                        Consumo (m³) [abrev] | Outorgado (m³) [abrev] |
+                        % Acrescido [abrev]
+
+        Larguras calculadas dinamicamente a partir do conteúdo real de cada
+        coluna (cabeçalho + dados), com margem de 2 caracteres e teto de 60.
+        """
         from openpyxl import Workbook
         from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
         from datetime import datetime
+        from collections import OrderedDict
 
-        wb = Workbook()
+        # ── Abreviações de mês ────────────────────────────────────────────────
+        ABREV_MES = {
+            'janeiro': 'jan', 'fevereiro': 'fev', 'março': 'mar',
+            'abril': 'abr', 'maio': 'mai', 'junho': 'jun',
+            'julho': 'jul', 'agosto': 'ago', 'setembro': 'set',
+            'outubro': 'out', 'novembro': 'nov', 'dezembro': 'dez',
+        }
+
+        def _abreviar_rotulo(nome_mes, ano):
+            """Converte rótulo completo em abreviação curta para cabeçalho Excel.
+
+            Exemplos:
+              'Janeiro/2026'                      → 'jan/26'
+              'Fevereiro/2026 (10/02 a 28/02)'    → 'fev/26 (10/02-28/02)'
+              'Março/2026 (01/03 a 18/03)'        → 'mar/26 (01/03-18/03)'
+            """
+            # Separar nome do mês do sufixo de dias, se houver
+            # Formato: "NomeMês/Ano" ou "NomeMês/Ano (DD/MM a DD/MM)"
+            sufixo = ""
+            base   = nome_mes
+
+            if '(' in nome_mes:
+                base, resto = nome_mes.split('(', 1)
+                base   = base.strip()
+                # resto = "DD/MM a DD/MM)"
+                resto  = resto.rstrip(')')
+                partes = [p.strip() for p in resto.split(' a ')]
+                if len(partes) == 2:
+                    sufixo = f" ({partes[0]}-{partes[1]})"
+
+            # base = "NomeMês/Ano" ou apenas "NomeMês" (modo mensal sem ano no nome)
+            if '/' in base:
+                nome_parte, ano_parte = base.rsplit('/', 1)
+            else:
+                nome_parte = base
+                ano_parte  = str(ano) if ano else ""
+
+            nome_lower = nome_parte.strip().lower()
+            abrev      = ABREV_MES.get(nome_lower, nome_parte.strip()[:3].lower())
+            ano_str    = str(ano_parte).strip()[-2:] if ano_parte else (str(ano)[-2:] if ano else "")
+
+            return f"{abrev}/{ano_str}{sufixo}"
+
+        # ── Estilos — padrão institucional ────────────────────────────────────
+        fill_azul   = PatternFill("solid", fgColor="175cc3")
+        fill_alt    = PatternFill("solid", fgColor="eaf2ff")
+        fill_alerta = PatternFill("solid", fgColor="f8d7da")
+        fill_info = PatternFill("solid", fgColor="fff9e6")
+        font_titulo = Font(bold=True, size=13, color="175cc3")
+        font_sub    = Font(size=10, italic=True, color="495057")
+        font_cab    = Font(bold=True, size=10, color="ffffff")
+        font_normal = Font(size=10)
+        font_num    = Font(bold=True, size=10, color="dc3545")
+        font_out    = Font(size=10, color="28a745")
+        font_rod    = Font(size=8, italic=True, color="888888")
+        ali_centro  = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        ali_esq     = Alignment(horizontal="left",   vertical="center", wrap_text=True)
+        ali_dir     = Alignment(horizontal="right",  vertical="center")
+        borda       = Border(
+            left=Side(style='thin'),  right=Side(style='thin'),
+            top=Side(style='thin'),   bottom=Side(style='thin'),
+        )
+
+        # ── Workbook ──────────────────────────────────────────────────────────
+        import sys as _sys
+        _lxml    = _sys.modules.pop('lxml',       None)
+        _lxml_et = _sys.modules.pop('lxml.etree', None)
+        try:
+            wb = Workbook()
+        finally:
+            if _lxml    is not None: _sys.modules['lxml']       = _lxml
+            if _lxml_et is not None: _sys.modules['lxml.etree'] = _lxml_et
+            
         ws = wb.active
-        ws.title = f"Alerta_{nome_mes}_{ano}"
+        ws.title = "Alerta Consumo"
 
-        header_fill = PatternFill(start_color="175cc3", end_color="175cc3", fill_type="solid")
-        header_font = Font(bold=True, color="FFFFFF", size=11)
-        alerta_fill = PatternFill(start_color="f8d7da", end_color="f8d7da", fill_type="solid")
-        borda = Border(
-            left=Side(style='thin'), right=Side(style='thin'),
-            top=Side(style='thin'),  bottom=Side(style='thin'),
-        )
+        # ── Definição de colunas ──────────────────────────────────────────────
+        N_FIXAS = 6
+        N_MES   = 3
 
-        ws.merge_cells('A1:G1')
-        ws['A1'] = "RELATÓRIO DE ALERTA - CONSUMO ACIMA DO VOLUME OUTORGADO"
-        ws['A1'].font      = Font(bold=True, size=14, color="175cc3")
-        ws['A1'].alignment = Alignment(horizontal="center", vertical="center")
-
-        ws.merge_cells('A2:G2')
-        ws['A2'] = (
-            f"Mês de Referência: {nome_mes}/{ano} | "
-            f"Gerado em: {datetime.now().strftime('%d/%m/%Y %H:%M')}"
-        )
-        ws['A2'].font      = Font(size=10, italic=True)
-        ws['A2'].alignment = Alignment(horizontal="center", vertical="center")
-        ws.append([])
-
-        headers = [
-            "Código Interferência", "CNARH", "Usuário", "Operador",
-            "Medidor(es)", "Consumo (m³)", "Outorgado (m³)",
+        colunas_fixas = [
+            ("INT_CD",          ali_esq),
+            ("CNARH",           ali_esq),
+            ("Empreendimento",  ali_esq),
+            ("Usuário",         ali_esq),
+            ("Operador",        ali_esq),
+            ("Medidor(es)",     ali_esq),
         ]
-        ws.append(headers)
-        for col in range(1, 8):
-            cell = ws.cell(row=4, column=col)
-            cell.fill      = header_fill
-            cell.font      = header_font
-            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Abreviações para os cabeçalhos das colunas dinâmicas
+        abrevs_meses = []
+        rotulos_meses_completos = []
+        for d in meses_para_exportar:
+            rot_completo = (d['nome_mes'] if not d.get('ano')
+                            else f"{d['nome_mes']}/{d['ano']}")
+            abrev        = _abreviar_rotulo(d['nome_mes'], d.get('ano', 0))
+            abrevs_meses.append(abrev)
+            rotulos_meses_completos.append(rot_completo)
+
+        n_total_cols = N_FIXAS + N_MES * len(meses_para_exportar)
+        col_last     = get_column_letter(n_total_cols)
+
+        # ── Consolidar dados por cod_interf ───────────────────────────────────
+        interf_order     = OrderedDict()
+        dados_por_interf = {}
+
+        # 1. Identificar quais interferências tiveram alerta em PELO MENOS um mês
+        interfs_com_alerta = set()
+        for d in meses_para_exportar:
+            for row_data in (d.get('resultados') or []):
+                interfs_com_alerta.add(row_data[0])
+
+        # 2. Consolidar apenas essas interferências (alertas + informativos)
+        for d in meses_para_exportar:
+            todos = list(d.get('resultados') or []) + list(d.get('informativos') or [])
+            for row_data in todos:
+                cod = row_data[0]
+                if cod not in interfs_com_alerta:
+                    continue   # ← descarta informativos puros
+                if cod not in interf_order:
+                    interf_order[cod]     = row_data
+                    dados_por_interf[cod] = {}
+
+        for mi, d in enumerate(meses_para_exportar):
+            todos = list(d.get('resultados') or []) + list(d.get('informativos') or [])
+            for row_data in todos:
+                if row_data[0] not in interfs_com_alerta:
+                    continue   # ← descarta informativos puros
+                dados_por_interf[row_data[0]][mi] = row_data
+
+        # ── Pré-calcular larguras dinâmicas ───────────────────────────────────
+        # Inicializa com comprimento do cabeçalho de cada coluna
+        larguras = {}
+
+        # Colunas fixas: inicializa com nome do cabeçalho
+        for ci, (nome, _) in enumerate(colunas_fixas, 1):
+            larguras[ci] = len(nome)
+
+        # Colunas dinâmicas: cabeçalho = "Consumo (m³)\nabrev" etc.
+        # Usa a linha mais longa do cabeçalho (quebrado em \n)
+        for mi, abrev in enumerate(abrevs_meses):
+            base = N_FIXAS + mi * N_MES + 1
+            for offset, prefixo in enumerate(
+                    [f"Consumo (m³)\n{abrev}",
+                     f"Outorgado (m³)\n{abrev}",
+                     f"% Acrescido\n{abrev}"]):
+                max_linha = max(len(l) for l in prefixo.split('\n'))
+                larguras[base + offset] = max_linha
+
+        # Iterar dados para ajustar larguras
+        fmt_num = lambda v: f"{v:,.2f}" if v is not None else "—"
+
+        for cod_interf, row_base in interf_order.items():
+            cnarh         = str(row_base[1]) if len(row_base) > 1 and row_base[1] else "N/A"
+            nome_empreend = str(row_base[2]) if len(row_base) > 2 and row_base[2] else "N/A"
+            usuario       = str(row_base[3]) if len(row_base) > 3 and row_base[3] else "N/A"
+            operador      = str(row_base[4]) if len(row_base) > 4 and row_base[4] else "N/A"
+            rotulos       = str(row_base[5]) if len(row_base) > 5 and row_base[5] else "N/A"
+
+            valores_fixos = [str(cod_interf), cnarh, nome_empreend,
+                             usuario, operador, rotulos]
+            for ci, val in enumerate(valores_fixos, 1):
+                larguras[ci] = max(larguras[ci], len(val))
+
+            for mi in range(len(meses_para_exportar)):
+                base    = N_FIXAS + mi * N_MES + 1
+                row_mes = dados_por_interf[cod_interf].get(mi)
+                if row_mes:
+                    consumo   = float(row_mes[6]) if len(row_mes) > 6 and row_mes[6] else 0.0
+                    outorgado = float(row_mes[7]) if len(row_mes) > 7 and row_mes[7] else 0.0
+                    pct       = float(row_mes[8]) if len(row_mes) > 8 else 0.0
+                    larguras[base]     = max(larguras[base],     len(fmt_num(consumo)))
+                    larguras[base + 1] = max(larguras[base + 1], len(fmt_num(outorgado)))
+                    larguras[base + 2] = max(larguras[base + 2], len(f"+{pct:.1f}%"))
+
+        # ── Linha 1 — Título ──────────────────────────────────────────────────
+        ws.merge_cells(f"A1:{col_last}1")
+        ws["A1"]           = "RELATÓRIO DE ALERTA — CONSUMO ACIMA DO VOLUME OUTORGADO"
+        ws["A1"].font      = font_titulo
+        ws["A1"].alignment = ali_centro
+        ws.row_dimensions[1].height = 24
+
+        # ── Linha 2 — Subtítulo ───────────────────────────────────────────────
+        ws.merge_cells(f"A2:{col_last}2")
+        total_alertas = sum(len(d['resultados']) for d in meses_para_exportar)
+        periodos_txt  = "  |  ".join(rotulos_meses_completos)
+        ws["A2"] = (
+            f"Períodos: {periodos_txt}  —  "
+            f"Total de alertas: {total_alertas}  —  "
+            f"Gerado em: {datetime.now().strftime('%d/%m/%Y  %H:%M:%S')}"
+        )
+        ws["A2"].font      = font_sub
+        ws["A2"].alignment = ali_centro
+        ws.row_dimensions[2].height = 16
+
+        # ── Linha 3 — Cabeçalho ───────────────────────────────────────────────
+        for ci, (nome, _) in enumerate(colunas_fixas, 1):
+            cell           = ws.cell(row=3, column=ci, value=nome)
+            cell.font      = font_cab
+            cell.fill      = fill_azul
+            cell.alignment = ali_centro
             cell.border    = borda
 
-        for row_data in dados:
-            (cod_interf, cnarh, usuario, operador, rotulos, consumo, outorgado) = row_data
-            ws.append([
-                str(cod_interf) if cod_interf else "N/A",
-                str(cnarh)      if cnarh      else "N/A",
-                str(usuario)    if usuario    else "N/A",
-                str(operador)   if operador   else "N/A",
-                str(rotulos)    if rotulos    else "N/A",
-                float(consumo)  if consumo    else 0.0,
-                float(outorgado) if outorgado else 0.0,
-            ])
-            linha = ws.max_row
-            if outorgado and float(consumo) > (float(outorgado) * 1.2):
-                for col in range(1, 8):
-                    ws.cell(row=linha, column=col).fill = alerta_fill
-            for col in (6, 7):
-                ws.cell(row=linha, column=col).number_format = '#,##0.00'
-                ws.cell(row=linha, column=col).alignment = Alignment(horizontal="right")
-            for col in range(1, 8):
-                ws.cell(row=linha, column=col).border = borda
+        for mi, abrev in enumerate(abrevs_meses):
+            base = N_FIXAS + mi * N_MES + 1
+            for offset, rotulo_col in enumerate([
+                f"Consumo (m³)\n{abrev}",
+                f"Outorgado (m³)\n{abrev}",
+                f"% Acrescido\n{abrev}",
+            ]):
+                cell           = ws.cell(row=3, column=base + offset, value=rotulo_col)
+                cell.font      = font_cab
+                cell.fill      = fill_azul
+                cell.alignment = ali_centro
+                cell.border    = borda
 
-        for i, w in enumerate([14, 14, 28, 22, 30, 18, 18], 1):
-            ws.column_dimensions[ws.cell(row=1, column=i).column_letter].width = w
+        ws.row_dimensions[3].height = 30
+
+        # ── Linhas de dados ───────────────────────────────────────────────────
+        for idx, (cod_interf, row_base) in enumerate(interf_order.items(), start=4):
+            cnarh         = row_base[1] if len(row_base) > 1 else None
+            nome_empreend = row_base[2] if len(row_base) > 2 else None
+            usuario       = row_base[3] if len(row_base) > 3 else None
+            operador      = row_base[4] if len(row_base) > 4 else None
+            rotulos       = row_base[5] if len(row_base) > 5 else None
+
+            tem_excesso = any(
+                float(r[6] if len(r) > 6 else 0) > float(r[7] if len(r) > 7 else 0)
+                for r in (dados_por_interf[cod_interf].get(mi, ())
+                          for mi in range(len(meses_para_exportar)))
+                if r
+            )
+
+            fill_linha = fill_alt if idx % 2 == 0 else None
+
+            # Colunas fixas
+            for ci, (val, (_, ali)) in enumerate(zip(
+                    [str(cod_interf)    if cod_interf    else "N/A",
+                     str(cnarh)         if cnarh         else "N/A",
+                     str(nome_empreend) if nome_empreend else "N/A",
+                     str(usuario)       if usuario       else "N/A",
+                     str(operador)      if operador      else "N/A",
+                     str(rotulos)       if rotulos       else "N/A"],
+                    colunas_fixas), 1):
+                cell           = ws.cell(row=idx, column=ci, value=val)
+                cell.font      = font_normal
+                cell.alignment = ali
+                cell.border    = borda
+                cell.fill      = fill_alerta if tem_excesso else (fill_linha or PatternFill())
+
+            # Colunas dinâmicas
+            for mi in range(len(meses_para_exportar)):
+                base    = N_FIXAS + mi * N_MES + 1
+                row_mes = dados_por_interf[cod_interf].get(mi)
+
+                if row_mes:
+                    consumo    = float(row_mes[6]) if len(row_mes) > 6 and row_mes[6] else 0.0
+                    outorgado  = float(row_mes[7]) if len(row_mes) > 7 and row_mes[7] else 0.0
+                    percentual = float(row_mes[8]) if len(row_mes) > 8 else (
+                        round((consumo / outorgado - 1.0) * 100.0, 1)
+                        if outorgado > 0 else 0.0
+                    )
+                    excesso_mes = consumo > outorgado
+                else:
+                    consumo = outorgado = percentual = None
+                    excesso_mes = False
+
+                eh_alerta_cel = bool(row_mes and len(row_mes) > 9 and row_mes[9])
+                fill_cel = (fill_alerta   if eh_alerta_cel
+                            else fill_info if row_mes
+                            else (fill_alt if idx % 2 == 0 else PatternFill()))
+
+                # Consumo
+                c1 = ws.cell(row=idx, column=base,
+                             value=consumo if consumo is not None else "—")
+                c1.font      = font_num if excesso_mes else font_normal
+                c1.alignment = ali_dir
+                c1.border    = borda
+                c1.fill      = fill_cel
+                if consumo is not None:
+                    c1.number_format = '#,##0.00'
+
+                # Outorgado
+                c2 = ws.cell(row=idx, column=base + 1,
+                             value=outorgado if outorgado is not None else "—")
+                c2.font      = font_out
+                c2.alignment = ali_dir
+                c2.border    = borda
+                c2.fill      = fill_cel
+                if outorgado is not None:
+                    c2.number_format = '#,##0.00'
+
+                # % Acrescido
+                pct_val = (percentual / 100.0) if percentual is not None else None
+                c3 = ws.cell(row=idx, column=base + 2,
+                             value=pct_val if pct_val is not None else "—")
+                c3.font      = font_num if excesso_mes else font_normal
+                c3.alignment = ali_centro
+                c3.border    = borda
+                c3.fill      = fill_cel
+                if pct_val is not None:
+                    c3.number_format = '0.0%'
+
+            ws.row_dimensions[idx].height = 15
+
+        # ── Aplicar larguras dinâmicas (conteúdo + margem 2, teto 100) ─────────
+        for ci, larg in larguras.items():
+            ws.column_dimensions[get_column_letter(ci)].width = min(larg + 2, 100)
+
+        # ── Freeze e rodapé ───────────────────────────────────────────────────
+        ws.freeze_panes = "A4"
+
+        rodape_row = len(interf_order) + 5
+        ws.merge_cells(f"A{rodape_row}:{col_last}{rodape_row}")
+        cell_rod           = ws.cell(
+            row=rodape_row, column=1,
+            value="Sistema DURH Diária por Telemetria (SFI/ANA) – Relatório gerado automaticamente"
+        )
+        cell_rod.font      = font_rod
+        cell_rod.alignment = ali_centro
 
         return wb
         
@@ -2105,7 +2554,8 @@ class JanelaMonitoramento(QWidget):
             if cursor:
                 cursor.close()
 
-    def _abrir_graficos_interferencia(self, cod_interf, rotulos, callback_fechar=None):
+    def _abrir_graficos_interferencia(self, cod_interf, rotulos, callback_fechar=None,
+                                      ano_inicial=None, mes_inicial=None):
         """Abre JanelaGraficosMedidor para UMA interferência específica (sem agregação).
         
         Args:
@@ -2179,7 +2629,9 @@ class JanelaMonitoramento(QWidget):
                 None,                      # termo_busca
                 None,                      # nome_completo
                 False,                     # eh_multipla_interferencia = False
-                {str(cod_interf)}          # codigos_interf (set com um elemento)
+                {str(cod_interf)},         # codigos_interf (set com um elemento)
+                ano_inicial=ano_inicial,   # ano de busca
+                mes_inicial=mes_inicial,   # mês de busca             
             )
                         
             self.janela_graficos.show()
@@ -2333,4 +2785,3 @@ class JanelaMonitoramento(QWidget):
         """Volta para a tela inicial."""
         self.close()
         self.tela_inicial.show()
-

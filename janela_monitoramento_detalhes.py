@@ -1181,7 +1181,7 @@ class JanelaMonitoramentoDetalhes(QWidget):
                         f"⚠️ Consumo corrigido ({fmt(valor_rodape)} m³) "
                         f"supera o outorgado ({fmt(volume_outorgado)} m³)\n"
                         f"Excesso: {fmt(valor_rodape - volume_outorgado)} m³ "
-                        f"({(valor_rodape / volume_outorgado * 100):.1f}% do outorgado)"
+                        f"({((valor_rodape - volume_outorgado) / volume_outorgado * 100):.1f}% do outorgado)"
                     )
                 else:
                     self.lbl_outorgado.setStyleSheet("color: #28a745; font-weight: bold;")
